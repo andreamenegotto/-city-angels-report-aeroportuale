@@ -1,30 +1,40 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import {
   BarChart3,
   Calendar,
+  Check,
   CheckCircle2,
   ChevronRight,
   Download,
+  Edit3,
   FileSpreadsheet,
+  FileText,
   Info,
+  Save,
   ShieldCheck,
   Sparkles,
   TrendingDown,
   TrendingUp,
+  Upload,
   Users,
+  X,
 } from 'lucide-react';
 import {
   HistoricalReportEntry,
   extractTaggedSubjectsFromText,
+  getReportNormalizedKey,
   getSaracinoAffiancamentoForReport,
 } from '../utils/reportHistoryMemory';
 import { ServiceReportData, formatDateIT } from '../types/report';
+import { parseUploadedReportFile } from '../utils/pdfArchiveParser';
 
 interface StatisticsPanelProps {
   historyReports: HistoricalReportEntry[];
   currentReport: ServiceReportData;
   onGenerateStatsPdf?: () => void;
   onAskGeminiStats?: (prompt: string) => void;
+  onUpdateHistoryReport?: (updatedEntry: HistoricalReportEntry) => void;
+  onNotice?: (msg: string) => void;
 }
 
 export interface ConsolidatedStatRow {
@@ -45,12 +55,156 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
   currentReport,
   onGenerateStatsPdf,
   onAskGeminiStats,
+  onUpdateHistoryReport,
+  onNotice,
 }) => {
   // Stime percentuali personalizzabili
   const [percentUomini, setPercentUomini] = useState<number>(82);
   const [percentDonne, setPercentDonne] = useState<number>(18);
   const [percentItaliani, setPercentItaliani] = useState<number>(58);
   const [percentStranieri, setPercentStranieri] = useState<number>(42);
+
+  // Stato modale modifica presenze e dati report
+  const [editingRow, setEditingRow] = useState<ConsolidatedStatRow | null>(null);
+  const [editPresenzeVal, setEditPresenzeVal] = useState<number>(0);
+  const [editColloquiVal, setEditColloquiVal] = useState<number>(0);
+  const [editCaposervizioVal, setEditCaposervizioVal] = useState<string>('');
+  const [editDataVal, setEditDataVal] = useState<string>('');
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
+
+  // Riferimento input per caricamento diretto PDF o JSON
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isProcessingFile, setIsProcessingFile] = useState<boolean>(false);
+
+  const handleOpenFilePicker = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileUploaded = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessingFile(true);
+    try {
+      const parsed = await parseUploadedReportFile(file);
+      const rep = parsed.report;
+      const repNum = rep.numeroReport || 0;
+      const is2025 = (rep.data || '').startsWith('2025') || file.name.includes('2025');
+      const targetYear = is2025 ? '2025' : '2026';
+      const targetKey = `${targetYear}-${repNum}`;
+
+      // Trova l'entry corrispondente nello storico
+      const existing = historyReports.find((h) => getReportNormalizedKey(h) === targetKey);
+
+      const updatedEntry: HistoricalReportEntry = {
+        id: existing ? existing.id : `uploaded-${Date.now()}`,
+        savedAt: new Date().toISOString(),
+        fileName: file.name,
+        report: rep,
+        driveFileId: existing?.driveFileId,
+        driveWebViewLink: existing?.driveWebViewLink,
+        driveWebContentLink: existing?.driveWebContentLink,
+      };
+
+      if (onUpdateHistoryReport) {
+        onUpdateHistoryReport(updatedEntry);
+      }
+
+      if (onNotice) {
+        onNotice(
+          `✅ Report N. ${repNum} (${formatDateIT(rep.data)}) importato e certificato! Presenze totali estratte: ${parsed.extractedPresenze}. Salvato nell'archivio cloud.`
+        );
+      }
+    } catch (err: any) {
+      if (onNotice) {
+        onNotice(`Errore lettura file report: ${err?.message || 'formato non valido'}`);
+      }
+    } finally {
+      setIsProcessingFile(false);
+    }
+  };
+
+  const handleOpenEditModal = (row: ConsolidatedStatRow) => {
+    setEditingRow(row);
+    setEditPresenzeVal(row.presenze);
+    setEditColloquiVal(row.colloqui);
+    setEditCaposervizioVal(row.caposervizio);
+    setEditDataVal(row.data);
+  };
+
+  const handleSaveReportEdit = async () => {
+    if (!editingRow) return;
+    setIsSavingEdit(true);
+
+    try {
+      const targetKey = `${editingRow.year}-${editingRow.numeroReport}`;
+      const existing = historyReports.find((h) => getReportNormalizedKey(h) === targetKey);
+
+      const baseRep: ServiceReportData = existing ? JSON.parse(JSON.stringify(existing.report)) : {
+        numeroReport: editingRow.numeroReport,
+        data: editDataVal || editingRow.data,
+        caposervizio: editCaposervizioVal || editingRow.caposervizio,
+        compilatore: 'Chiara Menegotto',
+        rilevazioni: [],
+        squadra: [],
+      } as any;
+
+      baseRep.data = editDataVal || baseRep.data;
+      baseRep.caposervizio = editCaposervizioVal || baseRep.caposervizio;
+
+      // Aggiorna o crea rilevazioni per riflettere esattamente il nuovo numero di presenze
+      if (!baseRep.rilevazioni || baseRep.rilevazioni.length === 0) {
+        baseRep.rilevazioni = [
+          {
+            id: `ril-${editingRow.year}-${editingRow.numeroReport}-1`,
+            luogoIndividuazione: 'Porta 1 e Varchi Aeroportuali T1',
+            numeroUtenti: editPresenzeVal,
+            aggancioEffettuato: editColloquiVal > 0,
+            descrizione: `Censimento utenza verificata (${editPresenzeVal} presenze totali) e presidio territorio.`,
+            foto: [],
+          },
+        ];
+      } else if (baseRep.rilevazioni.length === 1) {
+        baseRep.rilevazioni[0].numeroUtenti = editPresenzeVal;
+        baseRep.rilevazioni[0].aggancioEffettuato = editColloquiVal > 0;
+      } else {
+        const u1 = Math.round(editPresenzeVal * 0.65);
+        baseRep.rilevazioni[0].numeroUtenti = u1;
+        baseRep.rilevazioni[1].numeroUtenti = editPresenzeVal - u1;
+        baseRep.rilevazioni[0].aggancioEffettuato = editColloquiVal > 0;
+      }
+
+      // Imposta esplicitamente anche totalePresenzeOverride per sicurezza totale
+      (baseRep as any).totalePresenzeOverride = editPresenzeVal;
+
+      const updatedEntry: HistoricalReportEntry = {
+        id: existing ? existing.id : `manual-${Date.now()}`,
+        savedAt: new Date().toISOString(),
+        fileName: existing?.fileName,
+        driveFileId: existing?.driveFileId,
+        driveWebViewLink: existing?.driveWebViewLink,
+        driveWebContentLink: existing?.driveWebContentLink,
+        report: baseRep,
+      };
+
+      if (onUpdateHistoryReport) {
+        onUpdateHistoryReport(updatedEntry);
+      }
+
+      if (onNotice) {
+        onNotice(
+          `✅ Report N. ${editingRow.numeroReport} aggiornato: ${editPresenzeVal} presenze censite salvate nell'archivio cloud Firestore!`
+        );
+      }
+
+      setEditingRow(null);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
 
   // Consolidamento dati da storico + aggiornamento in tempo reale del report corrente
   const consolidatedRows = useMemo<ConsolidatedStatRow[]>(() => {
@@ -64,11 +218,18 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
       const year = is2025 ? '2025' : '2026';
       const key = `${year}-${num}-${rep.data}`;
 
-      // Calcola presenze
-      const presenze = (rep.rilevazioni || []).reduce((sum, r) => {
+      // Calcola presenze certificate
+      const sumRil = (rep.rilevazioni || []).reduce((sum, r) => {
         const u = Number(r.numeroUtenti);
         return sum + (Number.isFinite(u) ? Math.max(0, u) : 0);
       }, 0);
+      const presenze = Number.isFinite((rep as any).totalePresenzeOverride)
+        ? Number((rep as any).totalePresenzeOverride)
+        : sumRil > 0
+        ? sumRil
+        : Number.isFinite((rep as any).totalePresenze)
+        ? Number((rep as any).totalePresenze)
+        : 0;
 
       // Calcola colloqui
       const colloqui = (rep.rilevazioni || []).filter((r) => r.aggancioEffettuato).length;
@@ -185,6 +346,25 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUploaded}
+            accept=".pdf,.json"
+            className="hidden"
+          />
+
+          <button
+            type="button"
+            onClick={handleOpenFilePicker}
+            disabled={isProcessingFile}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 rounded-md cursor-pointer shadow-xs transition-colors"
+            title="Importa o aggiorna un report selezionando direttamente il file PDF o JSON dal computer o smartphone Android"
+          >
+            <Upload className={`w-4 h-4 text-amber-400 ${isProcessingFile ? 'animate-bounce' : ''}`} />
+            <span>{isProcessingFile ? 'Lettura File PDF...' : 'Importa Report (PDF o JSON)'}</span>
+          </button>
+
           {onAskGeminiStats && (
             <button
               type="button"
@@ -457,12 +637,13 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
                 <th className="p-2.5 text-center w-24">Colloqui</th>
                 <th className="p-2.5 text-left">Affiancamento</th>
                 <th className="p-2.5 text-center w-28">File Drive</th>
+                <th className="p-2.5 text-center w-24">Azioni</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 bg-white">
               {consolidatedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-4 text-center text-slate-500 italic">
+                  <td colSpan={8} className="p-4 text-center text-slate-500 italic">
                     Nessun report ancora presente nel registro storico.
                   </td>
                 </tr>
@@ -495,10 +676,15 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
                       {row.caposervizio}
                     </td>
                     <td className="p-2.5 text-center font-bold text-slate-900 font-mono">
-                      <span className="px-2 py-0.5 bg-slate-100 border border-slate-300 rounded">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditModal(row)}
+                        className="px-2 py-0.5 bg-slate-100 hover:bg-amber-100 hover:border-amber-400 border border-slate-300 rounded cursor-pointer transition-colors"
+                        title="Clicca per visualizzare o modificare le presenze"
+                      >
                         {row.presenze}
                         {row.isSpecialShift ? '*' : ''}
-                      </span>
+                      </button>
                     </td>
                     <td className="p-2.5 text-center font-semibold text-slate-800 font-mono">
                       {row.colloqui}
@@ -528,6 +714,17 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
                         <span className="text-slate-400 text-[10px]">Locale / Drive</span>
                       )}
                     </td>
+                    <td className="p-2.5 text-center whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditModal(row)}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors cursor-pointer"
+                        title="Modifica presenze o dati del report"
+                      >
+                        <Edit3 className="w-3 h-3 text-blue-700" />
+                        <span>Modifica</span>
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -535,6 +732,103 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
           </table>
         </div>
       </div>
+
+      {/* MODALE MODIFICA DATI REPORT E PRESENZE */}
+      {editingRow && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-lg border border-slate-300 shadow-xl max-w-md w-full p-5 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-blue-700" />
+                <h3 className="text-base font-bold text-slate-900">
+                  Modifica Report N. {editingRow.numeroReport} ({editingRow.year})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingRow(null)}
+                className="text-slate-400 hover:text-slate-700 text-sm font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Presenze Censite Totali (Numero Persone):
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={editPresenzeVal}
+                  onChange={(e) => setEditPresenzeVal(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  className="w-full h-10 px-3 text-base font-mono font-bold text-slate-900 bg-white border border-slate-300 rounded focus:ring-2 focus:ring-blue-600"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Numero totale di utenti censiti e assistiti in aerostazione durante il servizio.
+                </p>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Colloqui / Agganci Effettuati:
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={editColloquiVal}
+                  onChange={(e) => setEditColloquiVal(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  className="w-full h-9 px-3 text-xs font-mono bg-white border border-slate-300 rounded"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Data del Servizio:
+                </label>
+                <input
+                  type="date"
+                  value={editDataVal}
+                  onChange={(e) => setEditDataVal(e.target.value)}
+                  className="w-full h-9 px-3 text-xs bg-white border border-slate-300 rounded font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Caposervizio:
+                </label>
+                <input
+                  type="text"
+                  value={editCaposervizioVal}
+                  onChange={(e) => setEditCaposervizioVal(e.target.value)}
+                  className="w-full h-9 px-3 text-xs bg-white border border-slate-300 rounded"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => setEditingRow(null)}
+                className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded cursor-pointer"
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveReportEdit}
+                disabled={isSavingEdit}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-50 rounded cursor-pointer shadow-xs transition-colors"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{isSavingEdit ? 'Salvataggio...' : 'Salva nell\'Archivio Cloud'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

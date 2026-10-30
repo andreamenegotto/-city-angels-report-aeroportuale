@@ -103,6 +103,9 @@ import {
   subscribeToDriveFolderUrl,
 } from './utils/googleDriveService';
 import {
+  parseUploadedReportFile,
+} from './utils/pdfArchiveParser';
+import {
   HistoricalReportEntry,
   INITIAL_HISTORICAL_REPORTS,
   buildMemoryIndex,
@@ -2602,6 +2605,46 @@ export default function App() {
     );
   };
 
+  const handleManualHistoryReportUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const parsed = await parseUploadedReportFile(file);
+      const rep = parsed.report;
+      const repNum = rep.numeroReport || 0;
+      const is2025 = (rep.data || '').startsWith('2025') || file.name.includes('2025');
+      const targetYear = is2025 ? '2025' : '2026';
+      const targetKey = `${targetYear}-${repNum}`;
+
+      const existing = historyReports.find((h) => getReportNormalizedKey(h) === targetKey);
+
+      const updatedEntry: HistoricalReportEntry = {
+        id: existing ? existing.id : `uploaded-${Date.now()}`,
+        savedAt: new Date().toISOString(),
+        fileName: file.name,
+        report: rep,
+        driveFileId: existing?.driveFileId,
+        driveWebViewLink: existing?.driveWebViewLink,
+        driveWebContentLink: existing?.driveWebContentLink,
+      };
+
+      const merged = mergeReportEntries(historyReports, [updatedEntry]);
+      setHistoryReports(merged);
+      try {
+        localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(merged));
+      } catch {
+        // ignore
+      }
+      const userLabel = resolveAuthorName(report, driveUser, roster);
+      await pushSharedArchiveToCloud(merged, userLabel);
+      showNotice(
+        `✅ Report N. ${repNum} (${formatDateIT(rep.data)}) importato e certificato! Presenze totali lette: ${parsed.extractedPresenze}. Sincronizzato sul Cloud!`
+      );
+    } catch (err: any) {
+      showNotice(`Errore caricamento file report: ${err?.message || 'formato non valido'}`);
+    }
+  };
+
   const handleOpenNewReportModal = () => {
     const nextNum = getNextProgressiveReportNumber();
     setNewReportTargetNumber(nextNum);
@@ -4913,14 +4956,33 @@ export default function App() {
               historyReports={historyReports}
               currentReport={report}
               onAskGeminiStats={() => setActiveTab('gemini')}
+              onUpdateHistoryReport={(updatedEntry) => {
+                setHistoryReports((prev) => {
+                  const merged = mergeReportEntries(prev, [updatedEntry]);
+                  try {
+                    localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(merged));
+                  } catch {
+                    // ignore
+                  }
+                  const userLabel = resolveAuthorName(report, driveUser, roster);
+                  pushSharedArchiveToCloud(merged, userLabel).catch(() => {});
+                  return merged;
+                });
+              }}
+              onNotice={showNotice}
               onGenerateStatsPdf={async () => {
                 const rows = historyReports.map((item) => {
                   const rep = item.report;
                   const num = rep.numeroReport ?? 0;
-                  const presenze = (rep.rilevazioni || []).reduce(
+                  const sumRil = (rep.rilevazioni || []).reduce(
                     (sum, r) => sum + (Number.isFinite(Number(r.numeroUtenti)) ? Math.max(0, Number(r.numeroUtenti)) : 0),
                     0
                   );
+                  const presenze = Number.isFinite((rep as any).totalePresenzeOverride)
+                    ? Number((rep as any).totalePresenzeOverride)
+                    : sumRil > 0
+                    ? sumRil
+                    : (Number.isFinite((rep as any).totalePresenze) ? Number((rep as any).totalePresenze) : 0);
                   const colloqui = (rep.rilevazioni || []).filter((r) => r.aggancioEffettuato).length;
                   const affiancamento = getSaracinoAffiancamentoForReport(rep);
                   return {
@@ -5693,6 +5755,20 @@ export default function App() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <label
+                  className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 border border-slate-950 rounded-md transition-colors cursor-pointer shadow-2xs"
+                  title="Carica un report PDF o JSON (es. Report 38 o Report 39 corretti) per aggiornare direttamente lo storico e il cloud"
+                >
+                  <Upload className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Carica Report (PDF o JSON)</span>
+                  <input
+                    type="file"
+                    accept=".pdf,.json"
+                    onChange={handleManualHistoryReportUpload}
+                    className="hidden"
+                  />
+                </label>
+
                 <button
                   type="button"
                   onClick={handleSyncHistoryFromDrive}
@@ -5834,15 +5910,19 @@ export default function App() {
                 <div className="bg-slate-50 border border-slate-200 rounded p-3">
                   <div className="text-slate-500 font-medium">Presenze Censite Totali</div>
                   <div className="text-lg font-bold text-[#df0a14] mt-0.5">
-                    {filteredHistoryReports.reduce(
-                      (sum, item) =>
-                        sum +
-                        (item.report.rilevazioni || []).reduce(
-                          (sub, r) => sub + (Number(r.numeroUtenti) || 0),
-                          0
-                        ),
-                      0
-                    )}
+                    {filteredHistoryReports.reduce((sum, item) => {
+                      const rep = item.report;
+                      const s = (rep.rilevazioni || []).reduce(
+                        (sub, r) => sub + (Number(r.numeroUtenti) || 0),
+                        0
+                      );
+                      const p = Number.isFinite((rep as any).totalePresenzeOverride)
+                        ? Number((rep as any).totalePresenzeOverride)
+                        : s > 0
+                        ? s
+                        : (Number.isFinite((rep as any).totalePresenze) ? Number((rep as any).totalePresenze) : 0);
+                      return sum + p;
+                    }, 0)}
                   </div>
                 </div>
                 <div className="bg-slate-50 border border-slate-200 rounded p-3">
@@ -5894,10 +5974,15 @@ export default function App() {
                       const is2025 = (rep.data || '').startsWith('2025') || (entry.fileName || '').includes('2025');
                       const yearBadge = is2025 ? '2025' : '2026';
                       const isHistoricalUpTo36 = is2025 || repNum <= 36;
-                      const presenzeTot = (rep.rilevazioni || []).reduce(
+                      const sumRil = (rep.rilevazioni || []).reduce(
                         (sum, r) => sum + (Number(r.numeroUtenti) || 0),
                         0
                       );
+                      const presenzeTot = Number.isFinite((rep as any).totalePresenzeOverride)
+                        ? Number((rep as any).totalePresenzeOverride)
+                        : sumRil > 0
+                        ? sumRil
+                        : (Number.isFinite((rep as any).totalePresenze) ? Number((rep as any).totalePresenze) : 0);
                       const isFromDrive = entry.id.startsWith('drive-') || !!entry.fileName;
 
                       return (

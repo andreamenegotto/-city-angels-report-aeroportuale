@@ -26,6 +26,10 @@ import {
   TESTO_FISSO_LUOGO_TERMINE,
   TESTO_FISSO_RIFERIMENTI_EMERGENZE,
 } from '../types/report';
+import {
+  buildServiceReportFromExtractedPdf,
+  extractReportDataFromPdfBytes,
+} from './pdfArchiveParser';
 
 export const SCOPES = [
   'https://www.googleapis.com/auth/drive.file',
@@ -985,9 +989,8 @@ export async function scanDriveHierarchyRecursively(
     }
   }
 
-  // Convert non-JSON documents (ONLY PDF format as requested) found in 2025 and 2026 Drive subfolders into historical report entries
-  allFiles.forEach((file) => {
-    // Convert non-JSON documents (PDF o DOC/DOCX) found in Drive folders into historical report entries
+  // Convert non-JSON documents (PDF and DOC) found in 2025 and 2026 Drive subfolders into historical report entries
+  for (const file of allFiles) {
     const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.mimeType === 'application/pdf';
     const isDoc =
       file.name.toLowerCase().endsWith('.docx') ||
@@ -995,7 +998,7 @@ export async function scanDriveHierarchyRecursively(
       file.mimeType?.includes('word') ||
       file.mimeType?.includes('officedocument');
     if ((!isPdf && !isDoc) || file.isFolder) {
-      return;
+      continue;
     }
 
     const folderName = (file.folderPath || '').toLowerCase();
@@ -1007,65 +1010,61 @@ export async function scanDriveHierarchyRecursively(
       is2026 = true; // default to 2026
     }
 
-    if (is2025 || is2026 || fileName.includes('report') || fileName.includes('servizio')) {
-      const numMatch =
-        file.name.match(/(?:report|servizio|turno|verbale|n|num|n°|no)[._\s-]*(\d+)/i) ||
-        file.name.match(/^(\d+)[._\s-]/) ||
-        file.name.match(/[._\s-](\d+)(?:\.pdf|\.docx|\.doc|\.json|$)/i) ||
-        file.name.match(/(\d+)/);
-      const num = numMatch ? parseInt(numMatch[1], 10) : (is2025 ? 1 : 36);
+    const numMatch =
+      file.name.match(/(?:report|servizio|turno|verbale|n|num|n°|no)[._\s-]*(\d+)/i) ||
+      file.name.match(/^(\d+)[._\s-]/) ||
+      file.name.match(/[._\s-](\d+)(?:\.pdf|\.docx|\.doc|\.json|$)/i) ||
+      file.name.match(/(\d+)/);
+    let num = numMatch ? parseInt(numMatch[1], 10) : (is2025 ? 1 : 36);
 
-      // Limite storico 2025: il ciclo 2025 si è chiuso con il report 27 (18 Dicembre 2025).
-      // Per il 2026 i report proseguono regolarmente: il 35, 36 e successivi sono tutti pienamente supportati.
-      if (is2025 && num > 27) return;
+    // Limite storico 2025: il ciclo 2025 si è chiuso con il report 27 (18 Dicembre 2025).
+    if (is2025 && num > 27) continue;
 
-      const targetKey = `${is2025 ? '2025' : '2026'}-${num}`;
-      const exists = historicalReports.some((r) => getReportNormalizedKey(r) === targetKey);
-
-      if (!exists) {
-        // Look up corresponding seed report to use its real data and date
-        const matchingSeed = INITIAL_HISTORICAL_REPORTS.find((r) => {
-          const rIs2025 = (r.report.data || '').startsWith('2025') || (r.fileName || '').includes('2025');
-          return r.report.numeroReport === num && rIs2025 === is2025;
+    let extractedPdfData: any = null;
+    if (isPdf && token) {
+      try {
+        const dlUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
+          file.id
+        )}?alt=media&supportsAllDrives=true`;
+        const res = await fetch(dlUrl, {
+          headers: { Authorization: `Bearer ${token}` },
         });
-
-        // Parse any real date from filename as override
-        let fileDate = '';
-        const isoMatch = file.name.match(/(\d{4})[.-](\d{2})[.-](\d{2})/);
-        if (isoMatch) {
-          fileDate = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
-        } else {
-          const itMatch = file.name.match(/(\d{1,2})[.-](\d{1,2})[.-](\d{2,4})/);
-          if (itMatch) {
-            const d = itMatch[1].padStart(2, '0');
-            const m = itMatch[2].padStart(2, '0');
-            let y = itMatch[3];
-            if (y.length === 2) y = '20' + y;
-            fileDate = `${y}-${m}-${d}`;
+        if (res.ok) {
+          const arrBuf = await res.arrayBuffer();
+          extractedPdfData = extractReportDataFromPdfBytes(new Uint8Array(arrBuf), file.name);
+          if (extractedPdfData.numeroReport > 0) {
+            num = extractedPdfData.numeroReport;
           }
         }
+      } catch (pdfErr) {
+        console.warn(`Avviso lettura stream PDF Drive (${file.name}):`, pdfErr);
+      }
+    }
 
-        if (!is2025 && num === 36) {
-          historicalReports.push({
-            id: `drive-doc-${file.id}`,
-            savedAt: file.modifiedTime || '2026-10-08T22:30:00.000Z',
-            fileName: `${file.folderPath ? `[${file.folderPath}] ` : ''}${file.name}`,
-            driveFileId: file.id,
-            driveWebViewLink: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`,
-            driveWebContentLink: file.webContentLink,
-            report: getCanonicalReport36(),
-          });
-          return;
-        }
+    const targetKey = `${is2025 ? '2025' : '2026'}-${num}`;
+    const existingIndex = historicalReports.findIndex((r) => getReportNormalizedKey(r) === targetKey);
 
-        const baseReport = matchingSeed ? JSON.parse(JSON.stringify(matchingSeed.report)) : null;
-        const targetPresenze = is2025
-          ? (OFFICIAL_PRESENZE_2025[num] ?? 42)
-          : (OFFICIAL_PRESENZE_2026[num] ?? (num === 36 ? 48 : 50));
-        const saracinoAff = is2025
-          ? (OFFICIAL_SARACINO_AFFIANCAMENTI_2025[num] ? 'Ispettore Christian Saracino' : 'Nessuno //')
-          : (OFFICIAL_SARACINO_AFFIANCAMENTI_2026[num] ? 'Ispettore Christian Saracino' : 'Nessuno //');
-
+    // Se il file PDF contiene dati reali estratti (inclusi presenze totali certificate per report 38, 39 e successivi):
+    // il documento caricato successivamente dall'utente SOVRASCRIVE e CERTIFICA il numero di presenze corretto!
+    if (extractedPdfData && extractedPdfData.totalePresenze > 0) {
+      const generatedRep = buildServiceReportFromExtractedPdf(extractedPdfData, file.name);
+      if (existingIndex >= 0) {
+        const existingItem = historicalReports[existingIndex];
+        historicalReports[existingIndex] = {
+          ...existingItem,
+          id: existingItem.id?.startsWith('drive-') ? existingItem.id : `drive-${file.id}`,
+          fileName: `${file.folderPath ? `[${file.folderPath}] ` : ''}${file.name}`,
+          driveFileId: file.id,
+          driveWebViewLink: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`,
+          driveWebContentLink: file.webContentLink,
+          report: {
+            ...existingItem.report,
+            ...generatedRep,
+            rilevazioni: generatedRep.rilevazioni,
+          },
+        };
+        continue;
+      } else {
         historicalReports.push({
           id: `drive-doc-${file.id}`,
           savedAt: file.modifiedTime || new Date().toISOString(),
@@ -1073,54 +1072,110 @@ export async function scanDriveHierarchyRecursively(
           driveFileId: file.id,
           driveWebViewLink: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`,
           driveWebContentLink: file.webContentLink,
-          report: baseReport ? {
-            ...baseReport,
-            data: (!is2025 && num === 36) ? '2026-10-08' : (fileDate || baseReport.data),
-            personaleEsternoAffiancamento: saracinoAff !== 'Nessuno //' ? saracinoAff : baseReport.personaleEsternoAffiancamento,
-          } : {
-            numeroReport: num,
-            luogo: 'Aeroporto internazionale MXP, T1',
-            riferimentiCO: TESTO_FISSO_RIFERIMENTI_EMERGENZE,
-            data: fileDate || getReportCorrectDate(num, is2025),
-            oraInizio: '20:30',
-            oraFine: '01:30',
-            orarioTestoLibero: 'turno serale/notturno',
-            apertureSbarraInizio: [
-              { ora: '20:35', targa: 'GA 123 CA' },
-              { ora: '01:25', targa: 'GA 456 CA' },
-            ],
-            luogoTermineFisso: TESTO_FISSO_LUOGO_TERMINE,
-            comunicazioneInizioCO: '20:30',
-            comunicazioneFineCO: '01:30',
-            caposervizio: 'Andrea Menegotto',
-            compilatore: num >= 35 ? 'Chiara Menegotto' : 'Andrea Menegotto',
-            personaleEsternoAffiancamento: saracinoAff,
-            squadra: [
-              { id: 'm1', nomeCognome: 'Andrea Menegotto', nickname: 'Tiger', qualifica: 'Caposervizio', orarioServizio: '20:30 - 01:30', isCaposervizio: true },
-              { id: 'm2', nomeCognome: num >= 35 ? 'Chiara Menegotto' : 'Chiara Pozzi', nickname: num >= 35 ? 'Mene' : 'Gabry', qualifica: 'Compilatore', orarioServizio: '20:30 - 01:30', isCompilatore: true },
-            ],
-            rilevazioni: [
-              {
-                id: `ril-drive-${file.id}`,
-                luogoIndividuazione: 'Porta 1 e Varchi Aeroportuali T1',
-                numeroUtenti: targetPresenze,
-                aggancioEffettuato: true,
-                descrizione: `Documento archiviato su Google Drive (${file.name}). Censimento utenza (${targetPresenze} presenze) e presidio territorio.`,
-                foto: [],
-              },
-            ],
-            richiesteEmergenza: 'Nessuna //',
-            richiesteEmergenzaCOPS: 'Nessuna //',
-            richiesteEmergenzaCOSEA: 'Nessuna //',
-            richiesteEmergenzaProntoSoccorsoMXP: 'Nessuna //',
-            richiesteNonUrgenti: 'Nessuna //',
-            note: 'Documento archiviato sincronizzato da Google Drive.',
-            osservazioni: saracinoAff !== 'Nessuno //' ? 'Attività svolta con affiancamento Isp. Saracino.' : 'Attività svolta regolarmente.',
-          },
+          report: generatedRep,
         });
+        continue;
       }
     }
-  });
+
+    if (existingIndex === -1) {
+      // Look up corresponding seed report to use its real data and date
+      const matchingSeed = INITIAL_HISTORICAL_REPORTS.find((r) => {
+        const rIs2025 = (r.report.data || '').startsWith('2025') || (r.fileName || '').includes('2025');
+        return r.report.numeroReport === num && rIs2025 === is2025;
+      });
+
+      // Parse any real date from filename as override
+      let fileDate = '';
+      const isoMatch = file.name.match(/(\d{4})[.-](\d{2})[.-](\d{2})/);
+      if (isoMatch) {
+        fileDate = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+      } else {
+        const itMatch = file.name.match(/(\d{1,2})[.-](\d{1,2})[.-](\d{2,4})/);
+        if (itMatch) {
+          const d = itMatch[1].padStart(2, '0');
+          const m = itMatch[2].padStart(2, '0');
+          let y = itMatch[3];
+          if (y.length === 2) y = '20' + y;
+          fileDate = `${y}-${m}-${d}`;
+        }
+      }
+
+      if (!is2025 && num === 36) {
+        historicalReports.push({
+          id: `drive-doc-${file.id}`,
+          savedAt: file.modifiedTime || '2026-10-08T22:30:00.000Z',
+          fileName: `${file.folderPath ? `[${file.folderPath}] ` : ''}${file.name}`,
+          driveFileId: file.id,
+          driveWebViewLink: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`,
+          driveWebContentLink: file.webContentLink,
+          report: getCanonicalReport36(),
+        });
+        continue;
+      }
+
+      const baseReport = matchingSeed ? JSON.parse(JSON.stringify(matchingSeed.report)) : null;
+      const targetPresenze = is2025
+        ? (OFFICIAL_PRESENZE_2025[num] ?? 42)
+        : (OFFICIAL_PRESENZE_2026[num] ?? (num === 36 ? 48 : 45));
+      const saracinoAff = is2025
+        ? (OFFICIAL_SARACINO_AFFIANCAMENTI_2025[num] ? 'Ispettore Christian Saracino' : 'Nessuno //')
+        : (OFFICIAL_SARACINO_AFFIANCAMENTI_2026[num] ? 'Ispettore Christian Saracino' : 'Nessuno //');
+
+      historicalReports.push({
+        id: `drive-doc-${file.id}`,
+        savedAt: file.modifiedTime || new Date().toISOString(),
+        fileName: `${file.folderPath ? `[${file.folderPath}] ` : ''}${file.name}`,
+        driveFileId: file.id,
+        driveWebViewLink: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`,
+        driveWebContentLink: file.webContentLink,
+        report: baseReport ? {
+          ...baseReport,
+          data: (!is2025 && num === 36) ? '2026-10-08' : (fileDate || baseReport.data),
+          personaleEsternoAffiancamento: saracinoAff !== 'Nessuno //' ? saracinoAff : baseReport.personaleEsternoAffiancamento,
+        } : {
+          numeroReport: num,
+          luogo: 'Aeroporto internazionale MXP, T1',
+          riferimentiCO: TESTO_FISSO_RIFERIMENTI_EMERGENZE,
+          data: fileDate || getReportCorrectDate(num, is2025),
+          oraInizio: '20:30',
+          oraFine: '01:30',
+          orarioTestoLibero: 'turno serale/notturno',
+          apertureSbarraInizio: [
+            { ora: '20:35', targa: 'GA 123 CA' },
+            { ora: '01:25', targa: 'GA 456 CA' },
+          ],
+          luogoTermineFisso: TESTO_FISSO_LUOGO_TERMINE,
+          comunicazioneInizioCO: '20:30',
+          comunicazioneFineCO: '01:30',
+          caposervizio: 'Andrea Menegotto',
+          compilatore: num >= 35 ? 'Chiara Menegotto' : 'Andrea Menegotto',
+          personaleEsternoAffiancamento: saracinoAff,
+          squadra: [
+            { id: 'm1', nomeCognome: 'Andrea Menegotto', nickname: 'Tiger', qualifica: 'Caposervizio', orarioServizio: '20:30 - 01:30', isCaposervizio: true },
+            { id: 'm2', nomeCognome: num >= 35 ? 'Chiara Menegotto' : 'Chiara Pozzi', nickname: num >= 35 ? 'Mene' : 'Gabry', qualifica: 'Compilatore', orarioServizio: '20:30 - 01:30', isCompilatore: true },
+          ],
+          rilevazioni: [
+            {
+              id: `ril-drive-${file.id}`,
+              luogoIndividuazione: 'Porta 1 e Varchi Aeroportuali T1',
+              numeroUtenti: targetPresenze,
+              aggancioEffettuato: true,
+              descrizione: `Documento archiviato su Google Drive (${file.name}). Censimento utenza (${targetPresenze} presenze) e presidio territorio.`,
+              foto: [],
+            },
+          ],
+          richiesteEmergenza: 'Nessuna //',
+          richiesteEmergenzaCOPS: 'Nessuna //',
+          richiesteEmergenzaCOSEA: 'Nessuna //',
+          richiesteEmergenzaProntoSoccorsoMXP: 'Nessuna //',
+          richiesteNonUrgenti: 'Nessuna //',
+          note: 'Documento archiviato sincronizzato da Google Drive.',
+          osservazioni: saracinoAff !== 'Nessuno //' ? 'Attività svolta con affiancamento Isp. Saracino.' : 'Attività svolta regolarmente.',
+        },
+      });
+    }
+  }
 
   return {
     rootFolder: rootInfo,

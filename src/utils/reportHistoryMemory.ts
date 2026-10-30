@@ -64,7 +64,7 @@ export const OFFICIAL_PRESENZE_2026: Record<number, number> = {
   1: 41, 2: 45, 3: 75, 4: 45, 5: 60, 6: 10, 7: 49, 8: 42, 9: 41, 10: 37,
   11: 44, 12: 59, 13: 55, 14: 41, 15: 43, 16: 36, 17: 43, 18: 47, 19: 45,
   20: 41, 21: 51, 22: 63, 23: 31, 24: 37, 25: 46, 26: 50, 27: 38, 28: 42,
-  29: 36, 30: 55, 31: 46, 32: 53, 33: 61, 34: 60, 35: 76, 36: 48, 37: 78, 38: 19,
+  29: 36, 30: 55, 31: 46, 32: 53, 33: 61, 34: 60, 35: 76, 36: 48, 37: 78,
 };
 
 /**
@@ -536,7 +536,7 @@ export function sanitizeReportCompilatore(entry: HistoricalReportEntry): Histori
         rep.rilevazioni[1].numeroUtenti = targetPresenze - u1;
       }
     }
-  } else if (!is2025 && num in OFFICIAL_PRESENZE_2026) {
+  } else if (!is2025 && num <= 36 && num in OFFICIAL_PRESENZE_2026) {
     const targetPresenze = OFFICIAL_PRESENZE_2026[num];
     const curTotal = (rep.rilevazioni || []).reduce(
       (sum, r) => sum + (Number(r.numeroUtenti) || 0),
