@@ -94,27 +94,29 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
       });
     });
 
-    // 2. Se il report correntemente aperto nell'editor corrisponde a uno dei report archiviati, aggiorna in tempo reale la riga senza duplicare
-    if (currentReport && currentReport.numeroReport) {
+    // 2. Se il report correntemente aperto nell'editor corrisponde a uno dei report archiviati (stesso anno, stesso numero E stessa data), aggiorna in tempo reale la riga solo se ha dati validi
+    if (currentReport && currentReport.numeroReport && currentReport.data) {
       const curNum = Number(currentReport.numeroReport);
       const isCur2025 = (currentReport.data || '').startsWith('2025');
       const curYear = isCur2025 ? '2025' : '2026';
       for (const [k, v] of map.entries()) {
-        if (v.numeroReport === curNum && v.year === curYear) {
+        if (v.numeroReport === curNum && v.year === curYear && v.data === currentReport.data) {
           const curPresenze = (currentReport.rilevazioni || []).reduce((sum, r) => {
             const u = Number(r.numeroUtenti);
             return sum + (Number.isFinite(u) ? Math.max(0, u) : 0);
           }, 0);
-          const curColloqui = (currentReport.rilevazioni || []).filter((r) => r.aggancioEffettuato).length;
-          const affiancamento = getSaracinoAffiancamentoForReport(currentReport);
-          map.set(k, {
-            ...v,
-            data: currentReport.data || v.data,
-            caposervizio: currentReport.caposervizio || v.caposervizio,
-            presenze: curPresenze,
-            colloqui: curColloqui,
-            affiancamentoSaracino: affiancamento,
-          });
+          if (curPresenze > 0) {
+            const curColloqui = (currentReport.rilevazioni || []).filter((r) => r.aggancioEffettuato).length;
+            const affiancamento = getSaracinoAffiancamentoForReport(currentReport);
+            map.set(k, {
+              ...v,
+              data: currentReport.data || v.data,
+              caposervizio: currentReport.caposervizio || v.caposervizio,
+              presenze: curPresenze,
+              colloqui: curColloqui,
+              affiancamentoSaracino: affiancamento,
+            });
+          }
           break;
         }
       }

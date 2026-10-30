@@ -1,5 +1,7 @@
 import {
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   User,
@@ -263,6 +265,21 @@ export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
+  // Gestione automatica del redirect su smartphone o browser con blocco popup
+  getRedirectResult(auth)
+    .then((result) => {
+      if (result) {
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        if (credential?.accessToken) {
+          saveAccessToken(credential.accessToken);
+          if (onAuthSuccess) onAuthSuccess(result.user, credential.accessToken);
+        }
+      }
+    })
+    .catch((err) => {
+      console.warn('Controllo redirect Google Auth:', err);
+    });
+
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
       const token = await getAccessToken();
@@ -295,17 +312,23 @@ export const googleSignIn = async (): Promise<{
     return { user: result.user, accessToken: credential.accessToken };
   } catch (error: any) {
     console.error('Errore login Google:', error);
-    if (error?.code === 'auth/popup-blocked') {
-      throw new Error(
-        'La finestra di accesso Google è stata bloccata dal browser del dispositivo. Consenti i pop-up per questo sito o tocca direttamente il pulsante "Sign in with Google" dalla scheda Google Drive.'
-      );
+    if (error?.code === 'auth/popup-blocked' || error?.code === 'auth/cancelled-popup-request') {
+      try {
+        console.info('Popup bloccato dal browser. Avvio reindirizzamento sicuro a Google...');
+        await signInWithRedirect(auth, provider);
+        return null;
+      } catch (redirectErr) {
+        throw new Error(
+          'La finestra popup di accesso Google è stata bloccata. Consenti i pop-up nelle impostazioni del browser del dispositivo per connettere Google Drive.'
+        );
+      }
     }
     if (error?.code === 'auth/popup-closed-by-user') {
       throw new Error('Accesso Google annullato: la schermata di login è stata chiusa prima della conferma.');
     }
     if (error?.code === 'auth/unauthorized-domain') {
       throw new Error(
-        'Dominio non autorizzato per l\'autenticazione Google su Firebase. Contatta l\'amministratore del progetto.'
+        'Dominio non autorizzato per l\'autenticazione Google su Firebase. Verifica i domini autorizzati nella console Firebase.'
       );
     }
     throw error;

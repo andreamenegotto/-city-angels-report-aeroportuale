@@ -64,7 +64,7 @@ export const OFFICIAL_PRESENZE_2026: Record<number, number> = {
   1: 41, 2: 45, 3: 75, 4: 45, 5: 60, 6: 10, 7: 49, 8: 42, 9: 41, 10: 37,
   11: 44, 12: 59, 13: 55, 14: 41, 15: 43, 16: 36, 17: 43, 18: 47, 19: 45,
   20: 41, 21: 51, 22: 63, 23: 31, 24: 37, 25: 46, 26: 50, 27: 38, 28: 42,
-  29: 36, 30: 55, 31: 46, 32: 53, 33: 61, 34: 60, 35: 76, 36: 48,
+  29: 36, 30: 55, 31: 46, 32: 53, 33: 61, 34: 60, 35: 76, 36: 48, 37: 78, 38: 19,
 };
 
 /**
@@ -823,18 +823,49 @@ export function mergeReportEntries(
     }
 
     // 3. Per i nuovi report (> 36 del 2026 o nuovi inserimenti):
-    // Seleziona la versione più recente (timestamp più alto) o con rilevazioni più dettagliate
+    // Seleziona la versione con rilevazioni reali popolate o proveniente direttamente da Google Drive
     const timeExisting = existing.savedAt ? new Date(existing.savedAt).getTime() : 0;
     const timeNew = sanitized.savedAt ? new Date(sanitized.savedAt).getTime() : 0;
-    const newRilCount = (sanitized.report.rilevazioni || []).length;
-    const existingRilCount = (existing.report.rilevazioni || []).length;
+    
+    const countPopulated = (list: any[] = []) =>
+      list.filter((r) => r && (r.luogoIndividuazione?.trim() || r.descrizione?.trim() || Number(r.numeroUtenti) > 0)).length;
+
+    const newPopulated = countPopulated(sanitized.report?.rilevazioni);
+    const existingPopulated = countPopulated(existing.report?.rilevazioni);
+
+    const fromDrive = Boolean(sanitized.id?.startsWith('drive-') || sanitized.driveFileId);
+    const existingFromDrive = Boolean(existing.id?.startsWith('drive-') || existing.driveFileId);
+
+    // Pulisci le rilevazioni dagli slot vuoti duplicati
+    if (Array.isArray(sanitized.report?.rilevazioni)) {
+      sanitized.report.rilevazioni = sanitized.report.rilevazioni.filter(
+        (r) => r && (r.luogoIndividuazione?.trim() || r.descrizione?.trim() || Number(r.numeroUtenti) > 0)
+      );
+    }
+    if (Array.isArray(existing.report?.rilevazioni)) {
+      existing.report.rilevazioni = existing.report.rilevazioni.filter(
+        (r) => r && (r.luogoIndividuazione?.trim() || r.descrizione?.trim() || Number(r.numeroUtenti) > 0)
+      );
+    }
 
     if (
-      timeNew > timeExisting ||
-      newRilCount > existingRilCount ||
-      (sanitized.id?.startsWith('drive-') && !existing.id?.startsWith('drive-'))
+      (fromDrive && !existingFromDrive) ||
+      newPopulated > existingPopulated ||
+      (newPopulated === existingPopulated && timeNew >= timeExisting)
     ) {
-      map.set(key, sanitized);
+      map.set(key, {
+        ...sanitized,
+        driveFileId: sanitized.driveFileId || existing.driveFileId,
+        driveWebViewLink: sanitized.driveWebViewLink || existing.driveWebViewLink,
+        driveWebContentLink: sanitized.driveWebContentLink || existing.driveWebContentLink,
+      });
+    } else {
+      map.set(key, {
+        ...existing,
+        driveFileId: sanitized.driveFileId || existing.driveFileId,
+        driveWebViewLink: sanitized.driveWebViewLink || existing.driveWebViewLink,
+        driveWebContentLink: sanitized.driveWebContentLink || existing.driveWebContentLink,
+      });
     }
   });
 
