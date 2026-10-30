@@ -308,7 +308,7 @@ export async function signInWithGoogleIdentityServices(): Promise<{
   accessToken: string;
 }> {
   return new Promise((resolve, reject) => {
-    const oAuthClientId = firebaseConfig.oAuthClientId;
+    const oAuthClientId = (firebaseConfig as any).oAuthClientId;
     if (!oAuthClientId) {
       reject(new Error('OAuth Client ID non presente nella configurazione.'));
       return;

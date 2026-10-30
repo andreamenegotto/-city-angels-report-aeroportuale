@@ -70,6 +70,7 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
   const [editColloquiVal, setEditColloquiVal] = useState<number>(0);
   const [editCaposervizioVal, setEditCaposervizioVal] = useState<string>('');
   const [editDataVal, setEditDataVal] = useState<string>('');
+  const [editAffiancamentoVal, setEditAffiancamentoVal] = useState<string>('Nessuno //');
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
   // Riferimento input per caricamento diretto PDF o JSON
@@ -133,6 +134,16 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
     setEditColloquiVal(row.colloqui);
     setEditCaposervizioVal(row.caposervizio);
     setEditDataVal(row.data);
+    const targetKey = `${row.year}-${row.numeroReport}`;
+    const existing = historyReports.find((h) => getReportNormalizedKey(h) === targetKey);
+    const existingAff = existing?.report?.personaleEsternoAffiancamento;
+    if (existingAff && !existingAff.toLowerCase().includes('nessuno') && existingAff !== '//') {
+      setEditAffiancamentoVal(existingAff);
+    } else if (row.affiancamentoSaracino) {
+      setEditAffiancamentoVal(row.affiancamentoSaracino);
+    } else {
+      setEditAffiancamentoVal('Nessuno //');
+    }
   };
 
   const handleSaveReportEdit = async () => {
@@ -155,30 +166,61 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
       baseRep.data = editDataVal || baseRep.data;
       baseRep.caposervizio = editCaposervizioVal || baseRep.caposervizio;
 
-      // Aggiorna o crea rilevazioni per riflettere esattamente il nuovo numero di presenze
-      if (!baseRep.rilevazioni || baseRep.rilevazioni.length === 0) {
-        baseRep.rilevazioni = [
-          {
+      // Gestione rigorosa dell'affiancamento: se impostato a 'Nessuno //' o vuoto, rimuove Saracino o chiunque altro
+      const cleanAff = (editAffiancamentoVal || '').trim();
+      const isNone = !cleanAff || cleanAff.toLowerCase().includes('nessuno') || cleanAff === '//';
+      baseRep.personaleEsternoAffiancamento = isNone ? 'Nessuno //' : cleanAff;
+      if (isNone) {
+        baseRep.osservazioni = (baseRep.osservazioni || '').replace(/saracino/gi, '').trim() || 'Attività svolta regolarmente.';
+        baseRep.note = (baseRep.note || '').replace(/saracino/gi, '').trim();
+      }
+
+      // Imposta esplicitamente gli agganci / colloqui su baseRep e marca la modifica manuale sovrana
+      (baseRep as any).isManualEdit = true;
+      (baseRep as any).totaleColloquiOverride = editColloquiVal;
+      (baseRep as any).colloquiCount = editColloquiVal;
+      (baseRep as any).totalePresenzeOverride = editPresenzeVal;
+      (baseRep as any).totalePresenze = editPresenzeVal;
+
+      if (!Array.isArray(baseRep.rilevazioni)) {
+        baseRep.rilevazioni = [];
+      }
+
+      // Se servono punti per raggiungere il numero esatto di agganci richiesti, creali
+      while (baseRep.rilevazioni.length < editColloquiVal) {
+        const nextIdx = baseRep.rilevazioni.length + 1;
+        baseRep.rilevazioni.push({
+          id: `ril-${editingRow.year}-${editingRow.numeroReport}-${nextIdx}`,
+          luogoIndividuazione: `Presidio e Varchi T1 (Punto ${nextIdx})`,
+          numeroUtenti: 1,
+          aggancioEffettuato: true,
+          descrizione: `Colloquio e aggancio operativo n. ${nextIdx}.`,
+          foto: [],
+        });
+      }
+
+      // Assegna aggancioEffettuato esattamente su editColloquiVal punti
+      baseRep.rilevazioni.forEach((r, idx) => {
+        r.aggancioEffettuato = idx < editColloquiVal;
+      });
+
+      // Calibra la somma degli utenti sulle rilevazioni per coincidere esattamente con editPresenzeVal
+      const curSum = baseRep.rilevazioni.reduce((s, r) => s + (Number(r.numeroUtenti) || 0), 0);
+      if (curSum !== editPresenzeVal) {
+        if (baseRep.rilevazioni.length === 0) {
+          baseRep.rilevazioni.push({
             id: `ril-${editingRow.year}-${editingRow.numeroReport}-1`,
             luogoIndividuazione: 'Porta 1 e Varchi Aeroportuali T1',
             numeroUtenti: editPresenzeVal,
             aggancioEffettuato: editColloquiVal > 0,
             descrizione: `Censimento utenza verificata (${editPresenzeVal} presenze totali) e presidio territorio.`,
             foto: [],
-          },
-        ];
-      } else if (baseRep.rilevazioni.length === 1) {
-        baseRep.rilevazioni[0].numeroUtenti = editPresenzeVal;
-        baseRep.rilevazioni[0].aggancioEffettuato = editColloquiVal > 0;
-      } else {
-        const u1 = Math.round(editPresenzeVal * 0.65);
-        baseRep.rilevazioni[0].numeroUtenti = u1;
-        baseRep.rilevazioni[1].numeroUtenti = editPresenzeVal - u1;
-        baseRep.rilevazioni[0].aggancioEffettuato = editColloquiVal > 0;
+          });
+        } else {
+          const diff = editPresenzeVal - curSum;
+          baseRep.rilevazioni[0].numeroUtenti = Math.max(0, (baseRep.rilevazioni[0].numeroUtenti || 0) + diff);
+        }
       }
-
-      // Imposta esplicitamente anche totalePresenzeOverride per sicurezza totale
-      (baseRep as any).totalePresenzeOverride = editPresenzeVal;
 
       const updatedEntry: HistoricalReportEntry = {
         id: existing ? existing.id : `manual-${Date.now()}`,
@@ -196,7 +238,7 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
 
       if (onNotice) {
         onNotice(
-          `✅ Report N. ${editingRow.numeroReport} aggiornato: ${editPresenzeVal} presenze censite salvate nell'archivio cloud Firestore!`
+          `✅ Report N. ${editingRow.numeroReport} aggiornato: ${editPresenzeVal} presenze e ${editColloquiVal} agganci salvati nell'archivio cloud Firestore!`
         );
       }
 
@@ -216,7 +258,7 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
       const num = Number(rep.numeroReport) || 0;
       const is2025 = (rep.data || '').startsWith('2025') || (item.fileName || '').includes('2025');
       const year = is2025 ? '2025' : '2026';
-      const key = `${year}-${num}-${rep.data}`;
+      const key = `${year}-${num}`;
 
       // Calcola presenze certificate
       const sumRil = (rep.rilevazioni || []).reduce((sum, r) => {
@@ -232,7 +274,12 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
         : 0;
 
       // Calcola colloqui
-      const colloqui = (rep.rilevazioni || []).filter((r) => r.aggancioEffettuato).length;
+      const rilColloqui = (rep.rilevazioni || []).filter((r) => r.aggancioEffettuato).length;
+      const colloqui = Number.isFinite((rep as any).totaleColloquiOverride)
+        ? Number((rep as any).totaleColloquiOverride)
+        : Number.isFinite((rep as any).colloquiCount)
+        ? Number((rep as any).colloquiCount)
+        : rilColloqui;
 
       // Verifica affiancamento PolAria / Isp. Saracino rigorosamente allineato all'elenco ufficiale
       const affiancamento = getSaracinoAffiancamentoForReport(rep);
@@ -255,19 +302,26 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
       });
     });
 
-    // 2. Se il report correntemente aperto nell'editor corrisponde a uno dei report archiviati (stesso anno, stesso numero E stessa data), aggiorna in tempo reale la riga solo se ha dati validi
+    // 2. Se il report correntemente aperto nell'editor corrisponde a uno dei report archiviati (stesso anno e stesso numero), aggiorna in tempo reale la riga solo se ha dati validi
     if (currentReport && currentReport.numeroReport && currentReport.data) {
       const curNum = Number(currentReport.numeroReport);
       const isCur2025 = (currentReport.data || '').startsWith('2025');
       const curYear = isCur2025 ? '2025' : '2026';
       for (const [k, v] of map.entries()) {
-        if (v.numeroReport === curNum && v.year === curYear && v.data === currentReport.data) {
-          const curPresenze = (currentReport.rilevazioni || []).reduce((sum, r) => {
-            const u = Number(r.numeroUtenti);
-            return sum + (Number.isFinite(u) ? Math.max(0, u) : 0);
-          }, 0);
+        if (v.numeroReport === curNum && v.year === curYear) {
+          const curPresenze = Number.isFinite((currentReport as any).totalePresenzeOverride)
+            ? Number((currentReport as any).totalePresenzeOverride)
+            : (currentReport.rilevazioni || []).reduce((sum, r) => {
+                const u = Number(r.numeroUtenti);
+                return sum + (Number.isFinite(u) ? Math.max(0, u) : 0);
+              }, 0);
           if (curPresenze > 0) {
-            const curColloqui = (currentReport.rilevazioni || []).filter((r) => r.aggancioEffettuato).length;
+            const curRilColloqui = (currentReport.rilevazioni || []).filter((r) => r.aggancioEffettuato).length;
+            const curColloqui = Number.isFinite((currentReport as any).totaleColloquiOverride)
+              ? Number((currentReport as any).totaleColloquiOverride)
+              : Number.isFinite((currentReport as any).colloquiCount)
+              ? Number((currentReport as any).colloquiCount)
+              : curRilColloqui;
             const affiancamento = getSaracinoAffiancamentoForReport(currentReport);
             map.set(k, {
               ...v,
@@ -805,6 +859,38 @@ export const StatisticsPanel: React.FC<StatisticsPanelProps> = ({
                   onChange={(e) => setEditCaposervizioVal(e.target.value)}
                   className="w-full h-9 px-3 text-xs bg-white border border-slate-300 rounded"
                 />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Personale Esterno in Affiancamento:
+                </label>
+                <input
+                  type="text"
+                  value={editAffiancamentoVal}
+                  onChange={(e) => setEditAffiancamentoVal(e.target.value)}
+                  placeholder="Es: Nessuno // oppure Ispettore Christian Saracino"
+                  className="w-full h-9 px-3 text-xs bg-white border border-slate-300 rounded font-medium text-slate-800"
+                />
+                <div className="flex gap-2 mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setEditAffiancamentoVal('Nessuno //')}
+                    className="px-2 py-1 text-[11px] font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded cursor-pointer transition-colors"
+                  >
+                    Nessuno // (Rimuovi)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditAffiancamentoVal('Ispettore Christian Saracino')}
+                    className="px-2 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded cursor-pointer transition-colors"
+                  >
+                    + Isp. Christian Saracino
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Selezionare &quot;Nessuno //&quot; per rimuovere completamente qualsiasi affiancamento.
+                </p>
               </div>
             </div>
 

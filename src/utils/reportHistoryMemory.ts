@@ -65,6 +65,11 @@ export const OFFICIAL_PRESENZE_2026: Record<number, number> = {
   11: 44, 12: 59, 13: 55, 14: 41, 15: 43, 16: 36, 17: 43, 18: 47, 19: 45,
   20: 41, 21: 51, 22: 63, 23: 31, 24: 37, 25: 46, 26: 50, 27: 38, 28: 42,
   29: 36, 30: 55, 31: 46, 32: 53, 33: 61, 34: 60, 35: 76, 36: 48, 37: 78,
+  38: 80, 39: 110,
+};
+
+export const OFFICIAL_COLLOQUI_2026: Record<number, number> = {
+  38: 7,
 };
 
 /**
@@ -78,40 +83,31 @@ export function getSaracinoAffiancamentoForReport(report: ServiceReportData): st
   const is2025 = (report.data || '').startsWith('2025');
   const is2026 = (report.data || '').startsWith('2026') || !report.data;
 
-  // 1. Allineamento rigoroso al Registro Ufficiale 2026
-  if (is2026 && num in OFFICIAL_SARACINO_AFFIANCAMENTI_2026) {
-    return OFFICIAL_SARACINO_AFFIANCAMENTI_2026[num];
-  }
-
-  // 2. Allineamento rigoroso al Registro Ufficiale 2025
-  if (is2025 && num in OFFICIAL_SARACINO_AFFIANCAMENTI_2025) {
-    return OFFICIAL_SARACINO_AFFIANCAMENTI_2025[num];
-  }
-
-  if (num === 36) {
-    return 'Ispettore Christian Saracino';
-  }
-
-  // 3. Valutazione testo dinamico in personaleEsternoAffiancamento, note, osservazioni
+  // 1. Se il campo è esplicitamente 'Nessuno //', 'Nessuno', '//', vuoto o privo di affiancamento:
+  // NON c'è alcun affiancamento per nessuna ragione (priorità assoluta alle scelte e modifiche dell'utente)
   const affRaw = (report.personaleEsternoAffiancamento || '').trim();
   const affLower = affRaw.toLowerCase();
-  const noteLower = (report.note || '').trim().toLowerCase();
-  const obsLower = (report.osservazioni || '').trim().toLowerCase();
-  const combinedText = `${affLower} ${noteLower} ${obsLower}`;
 
-  if (combinedText.includes('saracino')) {
-    if (combinedText.includes('rimpatrio')) return 'Ispettore Christian Saracino (Pratiche rimpatrio)';
-    if (combinedText.includes('25/02')) return 'Ispettore Christian Saracino (Intervento 25/02)';
-    if (combinedText.includes('in loco')) return 'Ispettore Christian Saracino (Intervento in loco)';
-    if (combinedText.includes('identificazion')) return 'Ispettore Christian Saracino (Identificazioni)';
+  if (
+    !affRaw ||
+    affLower.includes('nessuno') ||
+    affRaw === '//' ||
+    affLower.includes('nessun affiancamento')
+  ) {
+    return '';
+  }
+
+  // 2. Se è specificato espressamente Saracino nel campo personaleEsternoAffiancamento:
+  if (affLower.includes('saracino')) {
+    if (affLower.includes('rimpatrio')) return 'Ispettore Christian Saracino (Pratiche rimpatrio)';
+    if (affLower.includes('25/02')) return 'Ispettore Christian Saracino (Intervento 25/02)';
+    if (affLower.includes('in loco')) return 'Ispettore Christian Saracino (Intervento in loco)';
+    if (affLower.includes('identificazion')) return 'Ispettore Christian Saracino (Identificazioni)';
     return 'Ispettore Christian Saracino';
   }
 
-  // 4. Se in futuro viene inserito un nominativo specifico (es. altro ispettore o agente in affiancamento)
+  // 3. Se è specificato un altro nominativo esterno:
   if (
-    affRaw &&
-    !affLower.includes('nessuno') &&
-    affRaw !== '//' &&
     affLower !== 'polaria' &&
     affLower !== 'polizia di frontiera'
   ) {
@@ -121,16 +117,24 @@ export function getSaracinoAffiancamentoForReport(report: ServiceReportData): st
       .replace(/^polaria\s*[-–:/]?\s*/i, '')
       .replace(/^polizia di frontiera\s*[-–:/]?\s*/i, '')
       .trim();
-    if (
-      cleanPerson.length > 0 &&
-      cleanPerson.toLowerCase() !== 'polaria' &&
-      cleanPerson.toLowerCase() !== 'polizia di frontiera'
-    ) {
+    if (cleanPerson.length > 0) {
       return cleanPerson;
     }
   }
 
-  // Esclusione categorica di diciture generiche senza nominativo
+  // 4. Default da registro storico ufficiale solo per report storici pregressi certificati se non specificato altrimenti
+  if (is2026 && num in OFFICIAL_SARACINO_AFFIANCAMENTI_2026) {
+    return OFFICIAL_SARACINO_AFFIANCAMENTI_2026[num];
+  }
+
+  if (is2025 && num in OFFICIAL_SARACINO_AFFIANCAMENTI_2025) {
+    return OFFICIAL_SARACINO_AFFIANCAMENTI_2025[num];
+  }
+
+  if (num === 36) {
+    return 'Ispettore Christian Saracino';
+  }
+
   return '';
 }
 
@@ -350,6 +354,9 @@ export function generateHistoricalReportsSeed(): HistoricalReportEntry[] {
     { num: 34, date: '2026-09-24', presenze: 60, colloqui: 2, desc: 'Servizio serale. Intervento coordinato con CO Security SEA.' },
     { num: 35, date: '2026-10-01', presenze: 76, colloqui: 2, desc: 'Report n. 35. Transizione verso i mesi freddi. Censimento ordinario completato. Presenza di Carla MENEGATTI, Nedka Petrova DEYANOVA, Massimo "Max" MILANI. Consegna passaporto smarrito.', compiler: 'Chiara Menegotto' },
     { num: 36, date: '2026-10-08', presenze: 48, colloqui: 2, desc: 'Report n. 36. Servizio serale/notturno T1 Malpensa (giovedì 8 ottobre 2026). Monitoraggio e censimento utenza stanziale (48 presenze rilevate), presidio varchi e coordinamento.', compiler: 'Chiara Menegotto' },
+    { num: 37, date: '2026-10-15', presenze: 78, colloqui: 3, desc: 'Report n. 37 del 15 ottobre 2026. Presidio e censimento (78 presenze rilevate).', compiler: 'Chiara Menegotto' },
+    { num: 38, date: '2026-10-22', presenze: 80, colloqui: 7, desc: 'Report n. 38 del 22 ottobre 2026. Censimento e presidio aeroportuale (80 persone censite complessivamente, 7 agganci/colloqui).', compiler: 'Chiara Menegotto' },
+    { num: 39, date: '2026-10-29', presenze: 110, colloqui: 4, desc: 'Report n. 39 del 29 ottobre 2026. Censimento e presidio aeroportuale (110 presenze censite).', compiler: 'Chiara Menegotto' },
   ];
 
   reports2026Config.forEach((item) => {
@@ -359,6 +366,61 @@ export function generateHistoricalReportsSeed(): HistoricalReportEntry[] {
         savedAt: `2026-10-08T22:30:00.000Z`,
         fileName: `36_Report_Servizio_MXP_2026.10.08.json`,
         report: getCanonicalReport36(),
+      });
+      return;
+    }
+
+    if (item.num === 38) {
+      entries.push({
+        id: `seed-2026-38`,
+        savedAt: `2026-10-22T22:30:00.000Z`,
+        fileName: `38_Report_Servizio_MXP_2026.10.22.json`,
+        report: {
+          numeroReport: 38,
+          luogo: 'Aeroporto internazionale MXP, T1',
+          riferimentiCO: 'CO Security SEA: 02.74862999 | CO PS: 02.74867553-02.74867552 | Pronto Soccorso MXP: 02.74864444',
+          data: '2026-10-22',
+          oraInizio: '18:00',
+          oraFine: '00:00',
+          orarioTestoLibero: 'Servizio 1: 18:00 - 21:00 | Servizio 2: 21:00 - 00:00',
+          apertureSbarraInizio: [
+            { ora: '17:51', targa: 'EY434AD' },
+            { ora: '20:41', targa: 'HE488ZW' },
+          ],
+          luogoTermineFisso: 'Parcheggio P1 (apertura sbarra tramite lettura targa mezzi)',
+          comunicazioneInizioCO: '17:54',
+          comunicazioneFineCO: '00:06',
+          caposervizio: 'Andrea Menegotto',
+          compilatore: 'Chiara Menegotto',
+          personaleEsternoAffiancamento: 'Nessuno //',
+          squadra: [
+            { id: 'm1', nomeCognome: 'Andrea Menegotto', nickname: 'Tiger', qualifica: 'Coordinatore CA Provincia di Varese - Presidente Coop., Consulente e Formatore esperto in compliance, safety, security e autodifesa', orarioServizio: '18:00 - 00:00', isCaposervizio: true, isCompilatore: false },
+            { id: 'm2', nomeCognome: 'Ambra Mazzoni', nickname: 'Trilly', qualifica: "Coordinatrice Varese città - Amministratore Cooperativa, Operatrice d'Emergenza, Counsellor", orarioServizio: '18:00 - 00:00', isCaposervizio: false, isCompilatore: false },
+            { id: 'm3', nomeCognome: 'Chiara Menegotto', nickname: 'Mene', qualifica: 'Responsabile Operativo CA Provincia di Varese, Responsabile Progettazione Coop., Operatrice d\'emergenza, Sociologa e Progettista Sociale', orarioServizio: '18:00 - 00:00', isCaposervizio: false, isCompilatore: true },
+            { id: 'm4', nomeCognome: 'Fabio Brandolini', nickname: 'Brando', qualifica: 'Caposquadra CA', orarioServizio: '18:00 - 00:00', isCaposervizio: false, isCompilatore: false },
+            { id: 'm5', nomeCognome: 'Elena Giussani', nickname: 'Spider', qualifica: 'Angelo semplice, Avvocato', orarioServizio: '18:00 - 00:00', isCaposervizio: false, isCompilatore: false },
+          ],
+          rilevazioni: [
+            { id: 'ril-2026-38-1', luogoIndividuazione: 'Poste Italiane - BancoPosta', numeroUtenti: 52, aggancioEffettuato: true, descrizione: 'Punto a: Massimo MILANI. Presidio BancoPosta e censimento area arrivi.', foto: [] },
+            { id: 'ril-2026-38-2', luogoIndividuazione: 'Porta 5 e Porta 4 - Piano Arrivi', numeroUtenti: 11, aggancioEffettuato: true, descrizione: 'Punti b, c, d, e: Carla Maria GRACIELA, Gaetano ARGIOLAS, Giuseppe PAPALIA, Katarina.', foto: [] },
+            { id: 'ril-2026-38-3', luogoIndividuazione: 'Tra porta 5 e porta 6', numeroUtenti: 8, aggancioEffettuato: true, descrizione: 'Punto g: Raffaele COZZOLINO, Paola ESTER, Emilio VISCONTI, Ivano, Claudio DI CRISTO, Manuela BARBAGLIA.', foto: [] },
+            { id: 'ril-2026-38-4', luogoIndividuazione: 'Tra porta 5 e porta 6 (Silvana)', numeroUtenti: 1, aggancioEffettuato: true, descrizione: 'Punto h: Silvana, colloquio su orientamento servizi sociali e rispetto delle regole.', foto: [] },
+            { id: 'ril-2026-38-5', luogoIndividuazione: 'Tra porta 5 e porta 6 (Thombol)', numeroUtenti: 1, aggancioEffettuato: true, descrizione: 'Punto i: Thombol, senegalese operatore ecologico a Borsano, colloquio approfondito.', foto: [] },
+            { id: 'ril-2026-38-6', luogoIndividuazione: 'Poste Italiane (Gabriel Zowa NDOMBASI)', numeroUtenti: 1, aggancioEffettuato: true, descrizione: 'Punto k: Gabriel Zowa NDOMBASI, colloquio orientamento lavoro e accoglienza.', foto: [] },
+            { id: 'ril-2026-38-7', luogoIndividuazione: 'Sedute davanti a CISL - CGIL (Luciano TOSCANO e ulteriori varchi)', numeroUtenti: 6, aggancioEffettuato: true, descrizione: 'Punto m e altri varchi: Luciano TOSCANO e censimento complessivo di 80 utenti.', foto: [] },
+          ],
+          richiesteEmergenza: 'Nessuna //',
+          richiesteEmergenzaCOPS: 'Nessuna //',
+          richiesteEmergenzaCOSEA: 'Nessuna //',
+          richiesteEmergenzaProntoSoccorsoMXP: 'Nessuna //',
+          richiesteNonUrgenti: 'Giaciglio in cima alle scale per salire da piano arrivi prima di Caffé Kimbo arrivando dalla porta 6 a piano partenze. Altro materiale è depositato alla porta 16 e alla porta 15.',
+          note: 'Un giovane poliziotto dell\'Ufficio immigrazione della Questura di Varese ci chiede indicazioni circa l\'ufficio cui rivolgersi per il rimpatrio assistito di un cittadino albanese. Lo accompagnamo alla Centrale Operativa della Polizia di Frontiera.',
+          osservazioni: 'Ribadiamo agli utenti che non è nostro compito distribuire alimenti, coperte e vestiario all\'interno della struttura aeroportuale. Lungo scambio con pattuglie dei Militari dell\'Aeronautica.',
+          totalePresenzeOverride: 80,
+          totalePresenze: 80,
+          totaleColloquiOverride: 7,
+          colloquiCount: 7,
+        } as any,
       });
       return;
     }
@@ -433,6 +495,20 @@ const VALID_COMPILERS_ROTATION = ['Chiara Pozzi', 'Chiara Menegotto', 'Andrea Me
 export function sanitizeReportCompilatore(entry: HistoricalReportEntry): HistoricalReportEntry {
   if (!entry || !entry.report) return entry;
   const rep = { ...entry.report };
+
+  // PRIORITÀ SOVRANA ALLE MODIFICHE MANUALI DELL'UTENTE:
+  // Se il report è stato modificato manualmente o contiene override espliciti impostati dall'utente,
+  // restituisci il report intatto senza applicare alcuna variazione o reinterpretazione automatica
+  if (
+    (rep as any).isManualEdit ||
+    (rep as any).totalePresenzeOverride != null ||
+    (rep as any).totaleColloquiOverride != null
+  ) {
+    return {
+      ...entry,
+      report: rep,
+    };
+  }
 
   const rawNum = rep.numeroReport;
   let num = typeof rawNum === 'number' ? rawNum : 0;
@@ -562,6 +638,28 @@ export function sanitizeReportCompilatore(entry: HistoricalReportEntry): Histori
         rep.rilevazioni[1].numeroUtenti = targetPresenze - u1;
       }
     }
+  } else if (!is2025 && num === 38) {
+    rep.data = '2026-10-22';
+    rep.personaleEsternoAffiancamento = 'Nessuno //';
+    (rep as any).totalePresenzeOverride = 80;
+    (rep as any).totalePresenze = 80;
+    (rep as any).totaleColloquiOverride = 7;
+    (rep as any).colloquiCount = 7;
+    if (rep.rilevazioni && rep.rilevazioni.length > 0) {
+      rep.rilevazioni.forEach((r, idx) => {
+        r.aggancioEffettuato = idx < 7;
+      });
+      const curSum = rep.rilevazioni.reduce((s, r) => s + (Number(r.numeroUtenti) || 0), 0);
+      if (curSum !== 80) {
+        const diff = 80 - curSum;
+        rep.rilevazioni[0].numeroUtenti = Math.max(0, (rep.rilevazioni[0].numeroUtenti || 0) + diff);
+      }
+    }
+  } else if (!is2025 && num === 39) {
+    rep.data = '2026-10-29';
+    rep.personaleEsternoAffiancamento = 'Nessuno //';
+    (rep as any).totalePresenzeOverride = 110;
+    (rep as any).totalePresenze = 110;
   }
 
   // Allineamento affiancamento Saracino per gli altri report ufficiali
@@ -743,6 +841,46 @@ export function mergeReportEntries(
     const is2025 = key.startsWith('2025');
     const numMatch = key.match(/(\d+)$/);
     const num = numMatch ? parseInt(numMatch[1], 10) : (sanitized.report.numeroReport || 0);
+
+    const isManualSanitized = Boolean(
+      (sanitized.report as any).isManualEdit ||
+      (sanitized.report as any).totalePresenzeOverride != null ||
+      (sanitized.report as any).totaleColloquiOverride != null
+    );
+
+    const isManualExisting = Boolean(
+      (existing.report as any).isManualEdit ||
+      (existing.report as any).totalePresenzeOverride != null ||
+      (existing.report as any).totaleColloquiOverride != null
+    );
+
+    // Se l'elemento in arrivo è una modifica manuale dell'utente, ha SEMPRE la precedenza assoluta
+    if (isManualSanitized) {
+      map.set(key, {
+        ...existing,
+        ...sanitized,
+        driveFileId: sanitized.driveFileId || existing.driveFileId,
+        driveWebViewLink: sanitized.driveWebViewLink || existing.driveWebViewLink,
+        driveWebContentLink: sanitized.driveWebContentLink || existing.driveWebContentLink,
+        fileName: sanitized.fileName || existing.fileName,
+        report: {
+          ...existing.report,
+          ...sanitized.report,
+        },
+      });
+      return;
+    }
+
+    // Se l'elemento esistente è una modifica manuale dell'utente e il nuovo elemento non lo è, proteggi i dati manuali
+    if (isManualExisting && !isManualSanitized) {
+      map.set(key, {
+        ...existing,
+        driveFileId: sanitized.driveFileId || existing.driveFileId,
+        driveWebViewLink: sanitized.driveWebViewLink || existing.driveWebViewLink,
+        driveWebContentLink: sanitized.driveWebContentLink || existing.driveWebContentLink,
+      });
+      return;
+    }
 
     // Se esiste già una voce per questo report (stesso numero e anno):
     // 1. Privilegia i dati strutturati JSON completi rispetto ai placeholder da soli file PDF

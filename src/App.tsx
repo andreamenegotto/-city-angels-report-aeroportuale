@@ -4968,6 +4968,15 @@ export default function App() {
                   pushSharedArchiveToCloud(merged, userLabel).catch(() => {});
                   return merged;
                 });
+                if (report && Number(report.numeroReport) === Number(updatedEntry.report?.numeroReport)) {
+                  setReport(JSON.parse(JSON.stringify(updatedEntry.report)));
+                  currentReportRef.current = updatedEntry.report;
+                  try {
+                    localStorage.setItem(STORAGE_KEY_REPORT, JSON.stringify(updatedEntry.report));
+                  } catch {
+                    // ignore
+                  }
+                }
               }}
               onNotice={showNotice}
               onGenerateStatsPdf={async () => {
@@ -4983,7 +4992,12 @@ export default function App() {
                     : sumRil > 0
                     ? sumRil
                     : (Number.isFinite((rep as any).totalePresenze) ? Number((rep as any).totalePresenze) : 0);
-                  const colloqui = (rep.rilevazioni || []).filter((r) => r.aggancioEffettuato).length;
+                  const rilColloqui = (rep.rilevazioni || []).filter((r) => r.aggancioEffettuato).length;
+                  const colloqui = Number.isFinite((rep as any).totaleColloquiOverride)
+                    ? Number((rep as any).totaleColloquiOverride)
+                    : Number.isFinite((rep as any).colloquiCount)
+                    ? Number((rep as any).colloquiCount)
+                    : rilColloqui;
                   const affiancamento = getSaracinoAffiancamentoForReport(rep);
                   return {
                     numeroReport: num,
