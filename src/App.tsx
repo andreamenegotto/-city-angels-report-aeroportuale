@@ -2533,6 +2533,28 @@ export default function App() {
     return { isArchived: true, isIdentical, entry: found };
   };
 
+  // Caricamento sicuro di un report storico nell'editor: protegge e archivia la bozza corrente se modificata
+  const handleLoadHistoricalReportToEditor = (targetReport: ServiceReportData) => {
+    const curNum = Number(report.numeroReport) || 0;
+    const targetNum = Number(targetReport.numeroReport) || 0;
+    const archiveStatus = isCurrentReportArchivedInHistory(report);
+    if (!archiveStatus.isIdentical) {
+      try {
+        saveCurrentReportToHistory(false);
+      } catch (err) {
+        console.warn('Avviso archiviazione automatica:', err);
+      }
+    }
+    hasUserEditedDraftRef.current = false;
+    setReport(JSON.parse(JSON.stringify(targetReport)));
+    setActiveTab('form');
+    showNotice(
+      !archiveStatus.isIdentical
+        ? `Bozza attiva (Report N. ${curNum || '—'}) salvata automaticamente nello storico. Caricato il Report N. ${targetNum || '—'} nell'editor.`
+        : `Dati del Report N. ${targetNum || '—'} del ${formatDateIT(targetReport.data)} caricati nell'editor.`
+    );
+  };
+
   const handleOpenNewReportModal = () => {
     const nextNum = getNextProgressiveReportNumber();
     setNewReportTargetNumber(nextNum);
@@ -5894,12 +5916,10 @@ export default function App() {
                                     onClick={() => {
                                       const is2025Rep = (rep.data || '').startsWith('2025') || (entry.fileName || '').includes('2025');
                                       const targetRep = (!is2025Rep && rep.numeroReport === 36) ? getCanonicalReport36() : rep;
-                                      setReport(JSON.parse(JSON.stringify(targetRep)));
-                                      setActiveTab('form');
-                                      showNotice(`Dati del Report N. ${targetRep.numeroReport ?? '—'} del ${formatDateIT(targetRep.data)} caricati nell'editor.`);
+                                      handleLoadHistoricalReportToEditor(targetRep);
                                     }}
                                     className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-md transition-colors cursor-pointer"
-                                    title="Consulta i dati storici del report nell'editor"
+                                    title="Consulta i dati storici del report nell'editor salvaguardando la bozza attiva"
                                   >
                                     Consulta
                                   </button>
@@ -5909,9 +5929,7 @@ export default function App() {
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      setReport(JSON.parse(JSON.stringify(entry.report)));
-                                      setActiveTab('form');
-                                      showNotice(`Report N. ${rep.numeroReport ?? '—'} del ${formatDateIT(rep.data)} caricato nell'editor!`);
+                                      handleLoadHistoricalReportToEditor(entry.report);
                                     }}
                                     className="px-2.5 py-1 text-xs font-semibold text-slate-800 bg-white hover:bg-slate-100 border border-slate-300 rounded transition-colors cursor-pointer"
                                     title="Carica questo report nei campi per visualizzarlo o modificarlo"
