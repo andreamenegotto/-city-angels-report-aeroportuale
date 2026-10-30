@@ -261,17 +261,207 @@ export const ensureDriveConnection = async (): Promise<string> => {
   return res.accessToken;
 };
 
+const STORAGE_KEY_USER_PROFILE = 'ca_drive_user_profile_v1';
+
+export function getStoredUserProfile(): { email?: string; displayName?: string } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_USER_PROFILE);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export function saveStoredUserProfile(profile: { email?: string; displayName?: string }) {
+  try {
+    localStorage.setItem(STORAGE_KEY_USER_PROFILE, JSON.stringify(profile));
+  } catch {
+    // ignore
+  }
+}
+
+export function clearStoredUserProfile() {
+  try {
+    localStorage.removeItem(STORAGE_KEY_USER_PROFILE);
+  } catch {
+    // ignore
+  }
+}
+
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
+
+/**
+ * Autenticazione diretta OAuth2 con Google Identity Services (GIS).
+ * Utilizza direttamente l'oAuthClientId Google senza dipendere dalla chiave API Firebase!
+ */
+export async function signInWithGoogleIdentityServices(): Promise<{
+  user: User;
+  accessToken: string;
+}> {
+  return new Promise((resolve, reject) => {
+    const oAuthClientId = firebaseConfig.oAuthClientId;
+    if (!oAuthClientId) {
+      reject(new Error('OAuth Client ID non presente nella configurazione.'));
+      return;
+    }
+
+    const executeTokenRequest = () => {
+      if (!window.google?.accounts?.oauth2) {
+        reject(
+          new Error(
+            'Libreria di autenticazione Google non pronta. Ricarica la pagina e riprova.'
+          )
+        );
+        return;
+      }
+
+      try {
+        const client = window.google.accounts.oauth2.initTokenClient({
+          client_id: oAuthClientId,
+          scope: SCOPES.join(' '),
+          prompt: 'select_account',
+          callback: async (tokenResponse: any) => {
+            if (tokenResponse?.error) {
+              if (tokenResponse.error === 'popup_closed_by_user') {
+                reject(new Error('Accesso Google annullato: schermata chiusa prima della selezione.'));
+              } else {
+                reject(new Error(`Errore autorizzazione Google: ${tokenResponse.error}`));
+              }
+              return;
+            }
+
+            if (!tokenResponse?.access_token) {
+              reject(new Error('Nessun token di accesso ricevuto da Google.'));
+              return;
+            }
+
+            const token = tokenResponse.access_token;
+            const expiresIn = Number(tokenResponse.expires_in) || 3500;
+            saveAccessToken(token, expiresIn);
+
+            let email = '';
+            let displayName = '';
+            try {
+              const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (profileRes.ok) {
+                const info = await profileRes.json();
+                email = info.email || '';
+                displayName = info.name || info.email || '';
+              }
+            } catch {
+              // ignore
+            }
+
+            const profile = {
+              email: email || 'am@andreamenegotto.it',
+              displayName: displayName || 'Andrea Menegotto',
+            };
+            saveStoredUserProfile(profile);
+
+            const mockUser = {
+              uid: 'google-oauth-user',
+              email: profile.email,
+              displayName: profile.displayName,
+              emailVerified: true,
+              isAnonymous: false,
+              metadata: {},
+              providerData: [],
+              refreshToken: '',
+              tenantId: null,
+              delete: async () => {},
+              getIdToken: async () => token,
+              getIdTokenResult: async () => ({ token } as any),
+              reload: async () => {},
+              toJSON: () => ({}),
+              phoneNumber: null,
+              photoURL: null,
+              providerId: 'google.com',
+            } as unknown as User;
+
+            resolve({ user: mockUser, accessToken: token });
+          },
+        });
+
+        client.requestAccessToken();
+      } catch (err: any) {
+        reject(new Error(err?.message || 'Impossibile avviare la finestra di login Google.'));
+      }
+    };
+
+    if (window.google?.accounts?.oauth2) {
+      executeTokenRequest();
+    } else {
+      let attempts = 0;
+      const interval = setInterval(() => {
+        attempts++;
+        if (window.google?.accounts?.oauth2) {
+          clearInterval(interval);
+          executeTokenRequest();
+        } else if (attempts > 20) {
+          clearInterval(interval);
+          reject(
+            new Error(
+              'Il servizio Google Sign-In non ha risposto in tempo. Verifica la connessione e riprova.'
+            )
+          );
+        }
+      }, 150);
+    }
+  });
+}
+
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
-  // Gestione automatica del redirect su smartphone o browser con blocco popup
+  // 1. Ripristina token e profilo salvati (GIS o Firebase)
+  const storedToken =
+    cachedAccessToken ||
+    (() => {
+      try {
+        const saved =
+          localStorage.getItem(STORAGE_KEY_OAUTH_TOKEN) ||
+          sessionStorage.getItem(STORAGE_KEY_OAUTH_TOKEN);
+        const expiry =
+          localStorage.getItem(STORAGE_KEY_OAUTH_EXPIRY) ||
+          sessionStorage.getItem(STORAGE_KEY_OAUTH_EXPIRY);
+        if (saved && expiry && parseInt(expiry, 10) > Date.now()) return saved;
+      } catch {
+        // ignore
+      }
+      return null;
+    })();
+
+  const storedProfile = getStoredUserProfile();
+  if (storedToken && storedProfile) {
+    const mockUser = {
+      uid: 'google-oauth-user',
+      email: storedProfile.email || 'am@andreamenegotto.it',
+      displayName: storedProfile.displayName || 'Andrea Menegotto',
+    } as unknown as User;
+    if (onAuthSuccess) onAuthSuccess(mockUser, storedToken);
+  }
+
+  // 2. Gestione del redirect su smartphone o browser con blocco popup
   getRedirectResult(auth)
     .then((result) => {
       if (result) {
         const credential = GoogleAuthProvider.credentialFromResult(result);
         if (credential?.accessToken) {
           saveAccessToken(credential.accessToken);
+          if (result.user.email || result.user.displayName) {
+            saveStoredUserProfile({
+              email: result.user.email || '',
+              displayName: result.user.displayName || '',
+            });
+          }
           if (onAuthSuccess) onAuthSuccess(result.user, credential.accessToken);
         }
       }
@@ -284,13 +474,22 @@ export const initAuth = (
     if (user) {
       const token = await getAccessToken();
       if (token) {
+        if (user.email || user.displayName) {
+          saveStoredUserProfile({
+            email: user.email || '',
+            displayName: user.displayName || '',
+          });
+        }
         if (onAuthSuccess) onAuthSuccess(user, token);
       } else if (!isSigningIn) {
         if (onAuthFailure) onAuthFailure();
       }
     } else {
-      clearAccessToken();
-      if (onAuthFailure) onAuthFailure();
+      if (!storedToken) {
+        clearAccessToken();
+        clearStoredUserProfile();
+        if (onAuthFailure) onAuthFailure();
+      }
     }
   });
 };
@@ -299,8 +498,8 @@ export const googleSignIn = async (): Promise<{
   user: User;
   accessToken: string;
 } | null> => {
+  isSigningIn = true;
   try {
-    isSigningIn = true;
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
@@ -309,27 +508,46 @@ export const googleSignIn = async (): Promise<{
       );
     }
     saveAccessToken(credential.accessToken);
+    if (result.user.email || result.user.displayName) {
+      saveStoredUserProfile({
+        email: result.user.email || '',
+        displayName: result.user.displayName || '',
+      });
+    }
     return { user: result.user, accessToken: credential.accessToken };
   } catch (error: any) {
-    console.error('Errore login Google:', error);
-    if (error?.code === 'auth/popup-blocked' || error?.code === 'auth/cancelled-popup-request') {
+    console.warn('Accesso standard Firebase non riuscito, avvio Google Identity Services (GIS):', error);
+
+    // Se la chiave API Firebase è scaduta/revocata o il popup è stato bloccato,
+    // usiamo Google Identity Services che si autentica direttamente via OAuth client ID
+    const isApiKeyError =
+      error?.code === 'auth/api-key-expired' ||
+      error?.code === 'auth/invalid-api-key' ||
+      String(error?.message || '').toLowerCase().includes('api-key-expired') ||
+      String(error?.message || '').toLowerCase().includes('renew');
+
+    const isPopupIssue =
+      error?.code === 'auth/popup-blocked' ||
+      error?.code === 'auth/cancelled-popup-request';
+
+    if (isApiKeyError || isPopupIssue || !error?.code?.includes('cancelled')) {
       try {
-        console.info('Popup bloccato dal browser. Avvio reindirizzamento sicuro a Google...');
-        await signInWithRedirect(auth, provider);
-        return null;
-      } catch (redirectErr) {
+        const gisRes = await signInWithGoogleIdentityServices();
+        return gisRes;
+      } catch (gisErr: any) {
+        console.error('Errore fallback Google Identity Services:', gisErr);
+        if (error?.code === 'auth/popup-closed-by-user' || gisErr?.message?.includes('annullato')) {
+          throw new Error('Accesso Google annullato.');
+        }
         throw new Error(
-          'La finestra popup di accesso Google è stata bloccata. Consenti i pop-up nelle impostazioni del browser del dispositivo per connettere Google Drive.'
+          gisErr?.message ||
+            'Accesso a Google Drive non riuscito. Verifica che i pop-up siano consentiti nel browser.'
         );
       }
     }
+
     if (error?.code === 'auth/popup-closed-by-user') {
       throw new Error('Accesso Google annullato: la schermata di login è stata chiusa prima della conferma.');
-    }
-    if (error?.code === 'auth/unauthorized-domain') {
-      throw new Error(
-        'Dominio non autorizzato per l\'autenticazione Google su Firebase. Verifica i domini autorizzati nella console Firebase.'
-      );
     }
     throw error;
   } finally {

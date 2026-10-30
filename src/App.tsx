@@ -280,6 +280,59 @@ function formatSyncTimestamp(at: string | number | undefined): string {
 }
 
 /**
+ * Ricava con precisione il nominativo reale del compilatore o autore registrato,
+ * evitando rigorosamente l'uso del testo generico "Compilatore".
+ */
+function resolveAuthorName(
+  report: ServiceReportData,
+  driveUser: any,
+  roster: RosterMember[] = []
+): string {
+  // 1. Nominativo esplicito da account Google autenticato
+  if (driveUser?.displayName && driveUser.displayName.trim()) {
+    return driveUser.displayName.trim();
+  }
+  // 2. Compilatore designato nel report (se valorizzato e diverso dalla dicitura generica)
+  if (
+    report?.compilatore &&
+    report.compilatore.trim() &&
+    report.compilatore.trim().toLowerCase() !== 'compilatore'
+  ) {
+    return report.compilatore.trim();
+  }
+  // 3. Volontario contrassegnato come compilatore nella squadra attiva
+  const teamComp = report?.squadra?.find((m) => m.isCompilatore && m.nomeCognome?.trim())?.nomeCognome?.trim();
+  if (teamComp) return teamComp;
+
+  // 4. Compilatore attivo dal registro presenze / anagrafica
+  const rosterComp = roster.find((r) => r.isCompilatore && r.nomeCognome?.trim())?.nomeCognome?.trim();
+  if (rosterComp) return rosterComp;
+
+  // 5. Caposervizio del report
+  if (
+    report?.caposervizio &&
+    report.caposervizio.trim() &&
+    report.caposervizio.trim().toLowerCase() !== 'caposervizio'
+  ) {
+    return report.caposervizio.trim();
+  }
+  const teamCapo = report?.squadra?.find((m) => m.isCaposervizio && m.nomeCognome?.trim())?.nomeCognome?.trim();
+  if (teamCapo) return teamCapo;
+
+  // 6. Primo membro registrato nella squadra
+  const firstMember = report?.squadra?.find((m) => m.nomeCognome?.trim())?.nomeCognome?.trim();
+  if (firstMember) return firstMember;
+
+  // 7. Eventuale email Google
+  if (driveUser?.email && driveUser.email.trim()) {
+    return driveUser.email.trim();
+  }
+
+  // 8. Riferimento registrato predefinito
+  return 'Chiara Menegotto';
+}
+
+/**
  * Optimizes an uploaded surveillance/intervention photo for fast rendering
  */
 function processImageFile(file: File): Promise<string> {
@@ -1109,10 +1162,7 @@ export default function App() {
     // Invia al cloud solo dopo l'idratazione iniziale se l'utente ha modificato attivamente i campi
     if (hasHydratedCloudDraftRef.current && hasUserEditedDraftRef.current) {
       setIsCloudSyncingLive(true);
-      const userLabel =
-        driveUser?.displayName
-          ? `${driveUser.displayName} (${driveUser.email || ''})`.trim()
-          : (driveUser?.email || report.compilatore || 'Compilatore');
+      const userLabel = resolveAuthorName(report, driveUser, roster);
       pushDraftToCloudDebounced(report, userLabel)
         .catch(() => {})
         .finally(() => {
@@ -2455,10 +2505,7 @@ export default function App() {
   const handleForcePushToCloud = async () => {
     setIsCloudSyncingLive(true);
     try {
-      const userLabel =
-        driveUser?.displayName
-          ? `${driveUser.displayName} (${driveUser.email || ''})`.trim()
-          : (driveUser?.email || report.compilatore || 'Compilatore');
+      const userLabel = resolveAuthorName(report, driveUser, roster);
       const saved = await pushDraftToCloudImmediate(report, userLabel);
       currentReportRef.current = report;
       lastAppliedRemoteHashRef.current = JSON.stringify(report);
@@ -3286,12 +3333,22 @@ export default function App() {
                   <p className="text-xs text-slate-300 mt-0.5">
                     {lastDraftSyncInfo ? (
                       <>
-                        Ultimo aggiornamento condiviso da{' '}
-                        <strong className="text-emerald-300 font-semibold">{lastDraftSyncInfo.by}</strong>{' '}
+                        Ultimo aggiornamento compilatore:{' '}
+                        <strong className="text-emerald-300 font-semibold">
+                          {(!lastDraftSyncInfo.by || lastDraftSyncInfo.by.toLowerCase() === 'compilatore')
+                            ? resolveAuthorName(report, driveUser, roster)
+                            : lastDraftSyncInfo.by}
+                        </strong>{' '}
                         {formatSyncTimestamp(lastDraftSyncInfo.at)}.
                       </>
                     ) : (
-                      'Il report in compilazione è sincronizzato in tempo reale su Cloud Firestore tra tutti i PC e smartphone Android.'
+                      <>
+                        Compilatore attivo:{' '}
+                        <strong className="text-emerald-300 font-semibold">
+                          {resolveAuthorName(report, driveUser, roster)}
+                        </strong>
+                        . Bozza sincronizzata in tempo reale tra tutti i PC e smartphone Android.
+                      </>
                     )}
                   </p>
                 </div>
