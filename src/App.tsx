@@ -283,20 +283,66 @@ function formatSyncTimestamp(at: string | number | undefined): string {
   return `il ${dateStr} alle ${timeStr}`;
 }
 
+export const OFFICIAL_COMPILERS = [
+  { name: 'Andrea Menegotto', nickname: 'Tiger', role: 'Coordinatore CA Prov. Varese' },
+  { name: 'Chiara Menegotto', nickname: 'Mene', role: 'Resp. Operativo Prov. Varese' },
+];
+
+export const isOfficialCompiler = (name?: string): boolean => {
+  if (!name) return false;
+  const n = name.trim().toLowerCase();
+  return n === 'andrea menegotto' || n === 'chiara menegotto';
+};
+
+export const KNOWN_OPERATORS = [
+  { name: 'Andrea Menegotto', nickname: 'Tiger', role: 'Coordinatore CA Prov. Varese' },
+  { name: 'Chiara Menegotto', nickname: 'Mene', role: 'Resp. Operativo Prov. Varese' },
+  { name: 'Chiara Pozzi', nickname: 'Gabry', role: 'Coordinatrice Sezioni Busto - Gallarate' },
+  { name: 'Ambra Mazzoni', nickname: 'Trilly', role: 'Coordinatrice Varese città' },
+  { name: 'Fabio "Guerriero"', nickname: 'Guerriero', role: 'Caposquadra' },
+  { name: 'Stefania Massarenti', nickname: 'Diana', role: 'Angelo semplice' },
+];
+
 /**
  * Ricava con precisione il nominativo reale del compilatore o autore registrato,
- * evitando rigorosamente l'uso del testo generico "Compilatore".
+ * evitando rigorosamente l'uso del testo generico "Compilatore" o fallback arbitrari.
  */
 function resolveAuthorName(
   report: ServiceReportData,
   driveUser: any,
-  roster: RosterMember[] = []
+  roster: RosterMember[] = [],
+  activeOperator?: string
 ): string {
-  // 1. Nominativo esplicito da account Google autenticato
-  if (driveUser?.displayName && driveUser.displayName.trim()) {
-    return driveUser.displayName.trim();
+  // 1. Operatore attivo selezionato esplicitamente per questo dispositivo
+  const storedOperator = (activeOperator || '').trim() || (() => {
+    try {
+      return localStorage.getItem('ca_active_operator_identity')?.trim() || '';
+    } catch {
+      return '';
+    }
+  })();
+  if (storedOperator) {
+    return storedOperator;
   }
-  // 2. Compilatore designato nel report (se valorizzato e diverso dalla dicitura generica)
+
+  // 2. Controllo account Google autenticato (email o profilo)
+  if (driveUser) {
+    const email = (driveUser.email || '').toLowerCase().trim();
+    if (email === 'am@andreamenegotto.it' || email.includes('andreamenegotto')) {
+      return 'Andrea Menegotto';
+    }
+    if (email.includes('chiaramenegotto')) {
+      return 'Chiara Menegotto';
+    }
+    if (email.includes('chiarapozzi')) {
+      return 'Chiara Pozzi';
+    }
+    if (driveUser.displayName && driveUser.displayName.trim()) {
+      return driveUser.displayName.trim();
+    }
+  }
+
+  // 3. Compilatore designato nel report (se valorizzato e diverso da diciture generiche)
   if (
     report?.compilatore &&
     report.compilatore.trim() &&
@@ -304,15 +350,16 @@ function resolveAuthorName(
   ) {
     return report.compilatore.trim();
   }
-  // 3. Volontario contrassegnato come compilatore nella squadra attiva
+
+  // 4. Volontario contrassegnato come compilatore nella squadra attiva
   const teamComp = report?.squadra?.find((m) => m.isCompilatore && m.nomeCognome?.trim())?.nomeCognome?.trim();
   if (teamComp) return teamComp;
 
-  // 4. Compilatore attivo dal registro presenze / anagrafica
+  // 5. Compilatore attivo dal registro presenze / anagrafica
   const rosterComp = roster.find((r) => r.isCompilatore && r.nomeCognome?.trim())?.nomeCognome?.trim();
   if (rosterComp) return rosterComp;
 
-  // 5. Caposervizio del report
+  // 6. Caposervizio del report
   if (
     report?.caposervizio &&
     report.caposervizio.trim() &&
@@ -323,17 +370,17 @@ function resolveAuthorName(
   const teamCapo = report?.squadra?.find((m) => m.isCaposervizio && m.nomeCognome?.trim())?.nomeCognome?.trim();
   if (teamCapo) return teamCapo;
 
-  // 6. Primo membro registrato nella squadra
+  // 7. Primo membro registrato nella squadra
   const firstMember = report?.squadra?.find((m) => m.nomeCognome?.trim())?.nomeCognome?.trim();
   if (firstMember) return firstMember;
 
-  // 7. Eventuale email Google
+  // 8. Eventuale email Google generica
   if (driveUser?.email && driveUser.email.trim()) {
     return driveUser.email.trim();
   }
 
-  // 8. Riferimento registrato predefinito
-  return 'Chiara Menegotto';
+  // 9. Predefinito sovrano dell'account di servizio (Andrea Menegotto)
+  return 'Andrea Menegotto';
 }
 
 /**
@@ -380,12 +427,12 @@ function processImageFile(file: File): Promise<string> {
 }
 
 /**
- * Recupera e ricostruisce in modo resiliente le firme dei compilatori
- * (Andrea Menegotto, Chiara Menegotto, Chiara Pozzi) scansionando tutte le chiavi
- * di archivio locali (versioni precedenti di firme e report) e garantendo i 3 compilatori ufficiali.
+ * Recupera e ricostruisce in modo resiliente le firme dei compilatori ufficiali
+ * (Andrea Menegotto e Chiara Menegotto) scansionando tutte le chiavi
+ * di archivio locali (versioni precedenti di firme e report) e garantendo i 2 compilatori ufficiali.
  */
 function recoverSavedSignatures(): SavedSignature[] {
-  const compilerKeys = ['Andrea Menegotto', 'Chiara Menegotto', 'Chiara Pozzi'];
+  const compilerKeys = ['Andrea Menegotto', 'Chiara Menegotto'];
   const map = new Map<string, SavedSignature>();
 
   // 1. Inizializza con le firme predefinite di sistema
@@ -525,7 +572,7 @@ function recoverSavedSignatures(): SavedSignature[] {
     }
   }
 
-  // 5. Costruisci l'array finale ordinato: Andrea Menegotto, Chiara Menegotto, Chiara Pozzi
+  // 5. Costruisci l'array finale ordinato: Andrea Menegotto, Chiara Menegotto
   const orderedResult: SavedSignature[] = [];
   compilerKeys.forEach((c) => {
     const existing = map.get(c.toLowerCase());
@@ -579,6 +626,17 @@ export default function App() {
   }, [driveFilesList]);
   const [isDriveLoggedIn, setIsDriveLoggedIn] = useState<boolean>(false);
   const [driveUser, setDriveUser] = useState<any>(null);
+
+  // Operatore attivo su questo specifico dispositivo (sovrano: Andrea Menegotto)
+  const [activeOperator, setActiveOperator] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('ca_active_operator_identity');
+      if (saved && saved.trim()) return saved.trim();
+    } catch {
+      // ignore
+    }
+    return 'Andrea Menegotto';
+  });
 
   // URL dell'applicazione (attivo e di produzione)
   const SHARED_APP_PRODUCTION_URL = 'https://ais-pre-ux5hjugbrh5ek3skefaro4-669136959862.europe-west2.run.app';
@@ -716,7 +774,7 @@ export default function App() {
   const [newPlateDef1, setNewPlateDef1] = useState<boolean>(false);
   const [newPlateDef2, setNewPlateDef2] = useState<boolean>(false);
 
-  // Archivio Firme Scansionate degli Operatori (Compilatori: Andrea Menegotto, Chiara Menegotto, Chiara Pozzi)
+  // Archivio Firme Scansionate degli Operatori (Compilatori Ufficiali: Andrea Menegotto, Chiara Menegotto)
   const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>(() => {
     return recoverSavedSignatures();
   });
@@ -926,7 +984,7 @@ export default function App() {
             }
           });
 
-          const priority = ['Andrea Menegotto', 'Chiara Menegotto', 'Chiara Pozzi'];
+          const priority = ['Andrea Menegotto', 'Chiara Menegotto'];
           const ordered: SavedSignature[] = [];
           priority.forEach((p) => {
             const found = map.get(p.toLowerCase());
@@ -1166,7 +1224,7 @@ export default function App() {
     // Invia al cloud solo dopo l'idratazione iniziale se l'utente ha modificato attivamente i campi
     if (hasHydratedCloudDraftRef.current && hasUserEditedDraftRef.current) {
       setIsCloudSyncingLive(true);
-      const userLabel = resolveAuthorName(report, driveUser, roster);
+      const userLabel = resolveAuthorName(report, driveUser, roster, activeOperator);
       pushDraftToCloudDebounced(report, userLabel)
         .catch(() => {})
         .finally(() => {
@@ -1278,6 +1336,16 @@ export default function App() {
       async (user, token) => {
         setIsDriveLoggedIn(true);
         setDriveUser(user);
+        if (user?.email) {
+          const em = user.email.toLowerCase();
+          if (em === 'am@andreamenegotto.it' || em.includes('andreamenegotto')) {
+            handleSetActiveOperator('Andrea Menegotto', false);
+          } else if (em.includes('chiaramenegotto')) {
+            handleSetActiveOperator('Chiara Menegotto', false);
+          } else if (em.includes('chiarapozzi')) {
+            handleSetActiveOperator('Chiara Pozzi', false);
+          }
+        }
         if (currentFolderId && token) {
           try {
             const { files, reports } = await loadHistoricalReportsFromDriveFolder(currentFolderId);
@@ -1731,6 +1799,11 @@ export default function App() {
     const targetMember = roster.find((r) => r.id === id);
     const targetName = targetMember?.nomeCognome?.trim() || '';
 
+    if (checked && !isOfficialCompiler(targetName)) {
+      showNotice('I soli compilatori autorizzati per il report sono Andrea Menegotto e Chiara Menegotto.');
+      return;
+    }
+
     // Aggiorna il roster: se checked è true, solo questo membro è compilatore e deve risultare presente
     setRoster((prev) =>
       prev.map((r) => {
@@ -1787,6 +1860,104 @@ export default function App() {
         firmaImmagineUrl: nextSigUrl,
       };
     });
+  };
+
+  const handleSetActiveOperator = (name: string, syncWithCurrentReport = false) => {
+    const clean = name.trim();
+    if (!clean) return;
+    setActiveOperator(clean);
+    try {
+      localStorage.setItem('ca_active_operator_identity', clean);
+    } catch {
+      // ignore
+    }
+    if (syncWithCurrentReport) {
+      applyCompilerToReport(clean);
+    } else {
+      showNotice(`Operatore dispositivo impostato su: "${clean}"`);
+    }
+  };
+
+  const applyCompilerToReport = (targetName: string) => {
+    const clean = targetName.trim();
+    if (!clean || !isOfficialCompiler(clean)) return;
+
+    const targetMember = roster.find(
+      (r) => r.nomeCognome?.trim().toLowerCase() === clean.toLowerCase()
+    );
+
+    const foundSig = savedSignatures.find(
+      (s) =>
+        s.nomeOperatore.trim().toLowerCase() === clean.toLowerCase() ||
+        clean.toLowerCase().includes(s.nomeOperatore.trim().toLowerCase())
+    );
+
+    setReport((prev) => {
+      let nextSquadra: TeamMember[] = (prev.squadra || []).map((m) => {
+        const isMatch = m.nomeCognome?.trim().toLowerCase() === clean.toLowerCase();
+        return {
+          ...m,
+          isCompilatore: isMatch,
+          isPresente: isMatch ? true : m.isPresente,
+        };
+      });
+
+      if (targetMember && !nextSquadra.some((m) => m.nomeCognome?.trim().toLowerCase() === clean.toLowerCase())) {
+        nextSquadra = alignSquadraToRosterOrder([
+          ...nextSquadra,
+          {
+            ...targetMember,
+            isCompilatore: true,
+            isPresente: true,
+          },
+        ], rosterRef.current);
+      }
+
+      return {
+        ...prev,
+        compilatore: clean,
+        firmaImmagineUrl: foundSig ? foundSig.immagineUrl : prev.firmaImmagineUrl,
+        squadra: nextSquadra,
+      };
+    });
+
+    setRoster((prev) =>
+      prev.map((r) => {
+        const isMatch = r.nomeCognome?.trim().toLowerCase() === clean.toLowerCase();
+        return {
+          ...r,
+          isCompilatore: isMatch,
+          isPresente: isMatch ? true : r.isPresente,
+        };
+      })
+    );
+
+    showNotice(
+      foundSig
+        ? `"${clean}" impostato come compilatore (firma autografa collegata ✅).`
+        : `"${clean}" impostato come compilatore della scheda.`
+    );
+  };
+
+  const handleSetTodayDate = () => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const todayStr = `${y}-${m}-${d}`;
+    updateField('data', todayStr);
+    showNotice(`Data impostata su oggi: ${formatDateIT(todayStr)}`);
+  };
+
+  const handleSetYesterdayDate = () => {
+    const now = new Date();
+    now.setDate(now.getDate() - 1);
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const yesterdayStr = `${y}-${m}-${d}`;
+    updateField('data', yesterdayStr);
+    showNotice(`Data impostata su ieri: ${formatDateIT(yesterdayStr)}`);
   };
 
   const addSavedSignature = async (
@@ -2497,10 +2668,7 @@ export default function App() {
 
     setHistoryReports((prev) => {
       const merged = mergeReportEntries(prev, [newEntry]);
-      const userLabel =
-        driveUser?.displayName
-          ? `${driveUser.displayName} (${driveUser.email || ''})`.trim()
-          : (driveUser?.email || report.compilatore || 'Compilatore');
+      const userLabel = resolveAuthorName(report, driveUser, roster, activeOperator);
       pushSharedArchiveToCloud(merged, userLabel).catch(() => {});
       return merged;
     });
@@ -2527,7 +2695,7 @@ export default function App() {
   const handleForcePushToCloud = async () => {
     setIsCloudSyncingLive(true);
     try {
-      const userLabel = resolveAuthorName(report, driveUser, roster);
+      const userLabel = resolveAuthorName(report, driveUser, roster, activeOperator);
       const saved = await pushDraftToCloudImmediate(report, userLabel);
       currentReportRef.current = report;
       lastAppliedRemoteHashRef.current = JSON.stringify(report);
@@ -2654,7 +2822,7 @@ export default function App() {
       } catch {
         // ignore
       }
-      const userLabel = resolveAuthorName(report, driveUser, roster);
+      const userLabel = resolveAuthorName(report, driveUser, roster, activeOperator);
       await pushSharedArchiveToCloud(merged, userLabel);
       showNotice(
         `✅ Report N. ${repNum} (${formatDateIT(rep.data)}) importato e certificato! Presenze totali lette: ${parsed.extractedPresenze}. Sincronizzato sul Cloud!`
@@ -2713,18 +2881,30 @@ export default function App() {
       comunicazioneInizioCO: '',
       comunicazioneFineCO: '',
       caposervizio: '',
-      compilatore: '',
-      firmaImmagineUrl: '',
-      squadra: (roster && roster.length > 0 ? roster : DEFAULT_ROSTER).map((r) => ({
-        id: r.id,
-        nomeCognome: r.nomeCognome,
-        nickname: r.nickname,
-        qualifica: r.qualifica,
-        orarioServizio: '',
-        note: '',
-        isCaposervizio: false,
-        isCompilatore: false,
-      })),
+      compilatore: activeOperator || 'Andrea Menegotto',
+      firmaImmagineUrl: (() => {
+        const targetOp = activeOperator || 'Andrea Menegotto';
+        const s = savedSignatures.find(
+          (sig) =>
+            sig.nomeOperatore.trim().toLowerCase() === targetOp.toLowerCase() ||
+            targetOp.toLowerCase().includes(sig.nomeOperatore.trim().toLowerCase())
+        );
+        return s ? s.immagineUrl : '';
+      })(),
+      squadra: (roster && roster.length > 0 ? roster : DEFAULT_ROSTER).map((r) => {
+        const isMatch = r.nomeCognome?.trim().toLowerCase() === (activeOperator || 'Andrea Menegotto').toLowerCase();
+        return {
+          id: r.id,
+          nomeCognome: r.nomeCognome,
+          nickname: r.nickname,
+          qualifica: r.qualifica,
+          orarioServizio: '',
+          note: '',
+          isCaposervizio: false,
+          isCompilatore: isMatch,
+          isPresente: isMatch ? true : r.isPresente,
+        };
+      }),
       personaleEsternoAffiancamento: '',
       rilevazioni: [
         {
@@ -2758,10 +2938,7 @@ export default function App() {
     }
 
     // Propaga immediatamente il nuovo report pulito a tutti i dispositivi connessi (PC e smartphone Android)
-    const userLabel =
-      driveUser?.displayName
-        ? `${driveUser.displayName} (${driveUser.email || ''})`.trim()
-        : (driveUser?.email || cleanReport.compilatore || 'Compilatore');
+    const userLabel = resolveAuthorName(cleanReport, driveUser, roster, activeOperator);
     pushDraftToCloudImmediate(cleanReport, userLabel).catch((err) => {
       console.warn('Errore propagazione nuovo report su Cloud:', err);
     });
@@ -3418,7 +3595,7 @@ export default function App() {
                         Ultimo aggiornamento compilatore:{' '}
                         <strong className="text-emerald-300 font-semibold">
                           {(!lastDraftSyncInfo.by || lastDraftSyncInfo.by.toLowerCase() === 'compilatore')
-                            ? resolveAuthorName(report, driveUser, roster)
+                            ? resolveAuthorName(report, driveUser, roster, activeOperator)
                             : lastDraftSyncInfo.by}
                         </strong>{' '}
                         {formatSyncTimestamp(lastDraftSyncInfo.at)}.
@@ -3427,12 +3604,36 @@ export default function App() {
                       <>
                         Compilatore attivo:{' '}
                         <strong className="text-emerald-300 font-semibold">
-                          {resolveAuthorName(report, driveUser, roster)}
+                          {resolveAuthorName(report, driveUser, roster, activeOperator)}
                         </strong>
                         . Bozza sincronizzata in tempo reale tra tutti i PC e smartphone Android.
                       </>
                     )}
                   </p>
+                  <div className="flex items-center gap-2 mt-2 pt-1.5 border-t border-emerald-900/60 flex-wrap text-xs">
+                    <span className="text-[11px] text-slate-300 font-medium">Stai operando come:</span>
+                    <select
+                      value={activeOperator}
+                      onChange={(e) => handleSetActiveOperator(e.target.value, false)}
+                      className="bg-slate-900 text-emerald-300 font-bold text-xs rounded px-2 py-0.5 border border-emerald-500/70 focus:outline-none focus:ring-1 focus:ring-emerald-400 cursor-pointer"
+                    >
+                      {KNOWN_OPERATORS.map((op) => (
+                        <option key={op.name} value={op.name}>
+                          {op.name} ({op.nickname})
+                        </option>
+                      ))}
+                    </select>
+                    {report.compilatore !== activeOperator && isOfficialCompiler(activeOperator) && (
+                      <button
+                        type="button"
+                        onClick={() => applyCompilerToReport(activeOperator)}
+                        className="px-2 py-0.5 text-[11px] font-bold text-emerald-200 bg-emerald-900/90 hover:bg-emerald-800 border border-emerald-500 rounded cursor-pointer transition-colors shadow-xs"
+                        title="Imposta il compilatore del report con il nome di questo operatore"
+                      >
+                        ✍️ Imposta me come compilatore della scheda
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-2 self-start md:self-center shrink-0">
@@ -3586,18 +3787,98 @@ export default function App() {
                 </div>
 
                 {/* Data del servizio */}
-                <div className="md:col-span-12 lg:col-span-4">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Data del Servizio
-                  </label>
+                <div className="md:col-span-12 lg:col-span-5 bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-xs font-bold text-slate-800">
+                      Data del Servizio
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={handleSetTodayDate}
+                        className="px-2 py-0.5 text-[11px] font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded cursor-pointer transition-colors shadow-2xs"
+                        title="Imposta data odierna di oggi"
+                      >
+                        📅 Oggi
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSetYesterdayDate}
+                        className="px-2 py-0.5 text-[11px] font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded cursor-pointer transition-colors shadow-2xs"
+                        title="Imposta data di ieri"
+                      >
+                        Ieri
+                      </button>
+                    </div>
+                  </div>
                   <input
                     type="date"
                     value={report.data}
                     onChange={(e) => updateField('data', e.target.value)}
-                    className="w-full h-10 px-3 text-sm font-mono-tabular bg-white border border-slate-300 rounded-md"
+                    className="w-full h-10 px-3 text-sm font-mono-tabular bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-slate-900"
                   />
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Data di svolgimento delle attività di servizio
+                  <div className="text-[11px] text-slate-600">
+                    {report.data ? (
+                      <span className="font-semibold text-emerald-700">
+                        {formatDateIT(report.data)}
+                      </span>
+                    ) : (
+                      <span className="text-amber-700 italic">Nessuna data impostata. Tocca &quot;📅 Oggi&quot; per impostare subito la data odierna.</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Compilatore Designato della Scheda */}
+                <div className="md:col-span-12 lg:col-span-7 bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <label className="block text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <UserCheck className="w-4 h-4 text-blue-700" />
+                      <span>Compilatore Ufficiale del Servizio</span>
+                    </label>
+                    {report.compilatore ? (
+                      <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
+                        Designato: {report.compilatore}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-300">
+                        Nessun compilatore designato
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => applyCompilerToReport('Andrea Menegotto')}
+                      className={`px-3 py-1.5 text-xs rounded-md font-semibold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                        report.compilatore?.trim().toLowerCase() === 'andrea menegotto'
+                          ? 'bg-blue-700 text-white border-blue-900 shadow-xs ring-2 ring-blue-300'
+                          : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'
+                      }`}
+                      title="Imposta Andrea Menegotto (Tiger) come compilatore ufficiale"
+                    >
+                      <span>✏️ Andrea Menegotto (Tiger)</span>
+                      {report.compilatore?.trim().toLowerCase() === 'andrea menegotto' && (
+                        <span className="text-[10px] bg-white text-blue-900 px-1.5 py-0.5 rounded font-bold">SELEZIONATO</span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyCompilerToReport('Chiara Menegotto')}
+                      className={`px-3 py-1.5 text-xs rounded-md font-semibold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                        report.compilatore?.trim().toLowerCase() === 'chiara menegotto'
+                          ? 'bg-blue-700 text-white border-blue-900 shadow-xs ring-2 ring-blue-300'
+                          : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'
+                      }`}
+                      title="Imposta Chiara Menegotto (Mene) come compilatore ufficiale"
+                    >
+                      <span>✏️ Chiara Menegotto (Mene)</span>
+                      {report.compilatore?.trim().toLowerCase() === 'chiara menegotto' && (
+                        <span className="text-[10px] bg-white text-blue-900 px-1.5 py-0.5 rounded font-bold">SELEZIONATO</span>
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Compilatori ufficiali abilitati: <strong>Andrea Menegotto</strong> e <strong>Chiara Menegotto</strong>. Selezionando il nominativo, la firma ufficiale scansionata viene collegata automaticamente per la stampa A4.
                   </p>
                 </div>
 
@@ -4230,30 +4511,39 @@ export default function App() {
 
                           {/* Checkbox Compilatore della scheda */}
                           <td className="p-2 text-center">
-                            <label
-                              className={`inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded cursor-pointer transition-all border ${
-                                isComp
-                                  ? 'bg-blue-700 text-white border-blue-800 font-bold shadow-xs'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:border-blue-300 hover:bg-slate-50'
-                              }`}
-                              title={
-                                isComp
-                                  ? `${member.nomeCognome} è il compilatore (firma collegata per la stampa)`
-                                  : `Spunta per impostare ${member.nomeCognome} come compilatore con firma`
-                              }
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isComp}
-                                onChange={(e) =>
-                                  toggleCompilatoreForMember(member.id, e.target.checked)
+                            {isOfficialCompiler(member.nomeCognome) ? (
+                              <label
+                                className={`inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded cursor-pointer transition-all border ${
+                                  isComp
+                                    ? 'bg-blue-700 text-white border-blue-800 font-bold shadow-xs'
+                                    : 'bg-white text-slate-700 border-slate-300 hover:border-blue-300 hover:bg-slate-50'
+                                }`}
+                                title={
+                                  isComp
+                                    ? `${member.nomeCognome} è il compilatore (firma collegata per la stampa)`
+                                    : `Spunta per impostare ${member.nomeCognome} come compilatore con firma`
                                 }
-                                className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
-                              />
-                              <span className="text-[11px] select-none whitespace-nowrap">
-                                {isComp ? 'Compilatore' : 'Spunta'}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isComp}
+                                  onChange={(e) =>
+                                    toggleCompilatoreForMember(member.id, e.target.checked)
+                                  }
+                                  className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+                                />
+                                <span className="text-[11px] select-none whitespace-nowrap">
+                                  {isComp ? 'Compilatore' : 'Spunta'}
+                                </span>
+                              </label>
+                            ) : (
+                              <span
+                                className="text-[11px] text-slate-300 font-mono select-none"
+                                title="I soli compilatori autorizzati sono Andrea Menegotto e Chiara Menegotto"
+                              >
+                                —
                               </span>
-                            </label>
+                            )}
                           </td>
 
                           {/* Rimuovi */}
@@ -5001,7 +5291,7 @@ export default function App() {
                   } catch {
                     // ignore
                   }
-                  const userLabel = resolveAuthorName(report, driveUser, roster);
+                  const userLabel = resolveAuthorName(report, driveUser, roster, activeOperator);
                   pushSharedArchiveToCloud(merged, userLabel).catch(() => {});
                   return merged;
                 });
@@ -5548,7 +5838,7 @@ export default function App() {
                     <span>Archivio Firme Scansionate dei Compilatori Ufficiali</span>
                   </div>
                   <p className="text-xs text-slate-600 mt-1">
-                    Carica o sostituisci le scansioni delle firme autografe per <strong>Andrea Menegotto (Tiger)</strong>, <strong>Chiara Menegotto (Mene)</strong> e <strong>Chiara Pozzi (Gabry)</strong>. Le firme sono sincronizzate nel database Cloud e accessibili a tutti i collaboratori autorizzati.
+                    Carica o sostituisci le scansioni delle firme autografe per <strong>Andrea Menegotto (Tiger)</strong> e <strong>Chiara Menegotto (Mene)</strong>. Le firme sono sincronizzate nel database Cloud e accessibili a tutti i collaboratori autorizzati.
                   </p>
                 </div>
                 <button

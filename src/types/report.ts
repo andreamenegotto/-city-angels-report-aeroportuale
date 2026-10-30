@@ -36,14 +36,6 @@ export const DEFAULT_SAVED_SIGNATURES: SavedSignature[] = [
       'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 60" width="240" height="60"><path d="M 20 40 C 30 20, 40 15, 45 35 C 50 42, 60 28, 68 33 C 78 38, 88 22, 98 30 C 110 36, 125 20, 140 28 C 155 35, 170 20, 190 25 M 18 26 L 175 22" fill="none" stroke="%231a365d" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     isDefault: false,
   },
-  {
-    id: 'sig-3',
-    nomeOperatore: 'Chiara Pozzi',
-    label: 'Firma Scansionata - Chiara Pozzi (Gabry)',
-    immagineUrl:
-      'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 60" width="240" height="60"><path d="M 25 45 C 32 18, 42 12, 48 35 C 54 48, 62 26, 70 32 C 80 40, 92 15, 100 28 C 115 38, 135 18, 155 30 C 175 42, 190 20, 215 25 M 20 28 C 80 20, 140 26, 200 18 M 22 52 C 80 46, 150 50, 218 42" fill="none" stroke="%231a365d" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    isDefault: false,
-  },
 ];
 
 export const DEFAULT_SAVED_PLATES: SavedLicensePlate[] = [
@@ -83,6 +75,7 @@ export interface TeamMember {
   note?: string;
   isCaposervizio?: boolean;
   isCompilatore?: boolean;
+  isPresente?: boolean;
 }
 
 export interface PhotoAttachment {
@@ -531,7 +524,7 @@ export function createInitialCleanReport(numeroReport = 37): ServiceReportData {
     comunicazioneInizioCO: '',
     comunicazioneFineCO: '',
     caposervizio: '',
-    compilatore: '',
+    compilatore: 'Andrea Menegotto',
     squadra: DEFAULT_ROSTER.map((r) => ({
       id: r.id,
       nomeCognome: r.nomeCognome,
@@ -540,7 +533,7 @@ export function createInitialCleanReport(numeroReport = 37): ServiceReportData {
       orarioServizio: '',
       note: '',
       isCaposervizio: false,
-      isCompilatore: false,
+      isCompilatore: r.nomeCognome === 'Andrea Menegotto',
     })),
     personaleEsternoAffiancamento: '',
     rilevazioni: [

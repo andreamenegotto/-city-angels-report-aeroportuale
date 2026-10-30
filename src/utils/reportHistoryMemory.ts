@@ -253,7 +253,7 @@ export function generateHistoricalReportsSeed(): HistoricalReportEntry[] {
     { num: 27, date: '2025-12-18', presenze: 41, colloqui: 1, desc: 'Report di servizio del 18 Dicembre. [Soggetto noto: Francesco DENTALI, MIMMO] presenti presso Porta US2329. Presenza di Gianfranco DI DIO su letto gonfiabile.' },
   ];
 
-  const validCompilers = ['Chiara Pozzi', 'Chiara Menegotto', 'Andrea Menegotto'];
+  const validCompilers = ['Andrea Menegotto', 'Chiara Menegotto'];
 
   reports2025Data.forEach((item) => {
     const comp = validCompilers[item.num % validCompilers.length];
@@ -284,7 +284,7 @@ export function generateHistoricalReportsSeed(): HistoricalReportEntry[] {
         personaleEsternoAffiancamento: saracinoAffiancamentoText || 'Nessuno //',
         squadra: [
           { id: 'm1', nomeCognome: 'Andrea Menegotto', nickname: 'Tiger', qualifica: 'Caposervizio', orarioServizio: '20:30 - 01:30', isCaposervizio: true, isCompilatore: comp === 'Andrea Menegotto' },
-          { id: 'm2', nomeCognome: comp === 'Andrea Menegotto' ? 'Chiara Pozzi' : comp, nickname: comp.includes('Pozzi') ? 'Gabry' : comp.includes('Chiara Menegotto') ? 'Mene' : 'Tiger', qualifica: 'Compilatore', orarioServizio: '20:30 - 01:30', isCompilatore: comp !== 'Andrea Menegotto' },
+          { id: 'm2', nomeCognome: comp === 'Andrea Menegotto' ? 'Chiara Menegotto' : comp, nickname: comp.includes('Chiara Menegotto') ? 'Mene' : 'Tiger', qualifica: 'Compilatore', orarioServizio: '20:30 - 01:30', isCompilatore: comp !== 'Andrea Menegotto' },
           { id: 'm3', nomeCognome: 'Ambra Mazzoni', nickname: 'Trilly', qualifica: "Operatrice d'Emergenza", orarioServizio: '20:30 - 01:30', isCompilatore: false },
         ],
         rilevazioni: [
@@ -454,7 +454,7 @@ export function generateHistoricalReportsSeed(): HistoricalReportEntry[] {
         personaleEsternoAffiancamento: saracinoAffiancamentoText || 'Nessuno //',
         squadra: [
           { id: 'm1', nomeCognome: 'Andrea Menegotto', nickname: 'Tiger', qualifica: 'Caposervizio', orarioServizio: '20:30 - 01:30', isCaposervizio: true, isCompilatore: comp === 'Andrea Menegotto' },
-          { id: 'm2', nomeCognome: comp === 'Andrea Menegotto' ? 'Chiara Pozzi' : comp, nickname: comp.includes('Pozzi') ? 'Gabry' : comp.includes('Chiara Menegotto') ? 'Mene' : 'Tiger', qualifica: 'Compilatore', orarioServizio: '20:30 - 01:30', isCompilatore: comp !== 'Andrea Menegotto' },
+          { id: 'm2', nomeCognome: comp === 'Andrea Menegotto' ? 'Chiara Menegotto' : comp, nickname: comp.includes('Chiara Menegotto') ? 'Mene' : 'Tiger', qualifica: 'Compilatore', orarioServizio: '20:30 - 01:30', isCompilatore: comp !== 'Andrea Menegotto' },
           { id: 'm3', nomeCognome: 'Ambra Mazzoni', nickname: 'Trilly', qualifica: "Operatrice d'Emergenza / Counsellor", orarioServizio: '20:30 - 01:30', isCompilatore: false },
           { id: 'm4', nomeCognome: 'Roberto S.', nickname: 'Roby', qualifica: 'Volontario Operativo OdV', orarioServizio: '20:30 - 01:30' },
         ],
@@ -490,7 +490,7 @@ export function generateHistoricalReportsSeed(): HistoricalReportEntry[] {
   return entries;
 }
 
-const VALID_COMPILERS_ROTATION = ['Chiara Pozzi', 'Chiara Menegotto', 'Andrea Menegotto'];
+const VALID_COMPILERS_ROTATION = ['Andrea Menegotto', 'Chiara Menegotto'];
 
 export function sanitizeReportCompilatore(entry: HistoricalReportEntry): HistoricalReportEntry {
   if (!entry || !entry.report) return entry;
@@ -680,11 +680,12 @@ export function sanitizeReportCompilatore(entry: HistoricalReportEntry): Histori
     !cleanComp ||
     cleanComp.includes('ambra') ||
     cleanComp.includes('mazzoni') ||
+    cleanComp.includes('pozzi') ||
     !(
-      cleanComp.includes('menegotto') ||
-      cleanComp.includes('pozzi') ||
-      cleanComp.includes('chiara') ||
-      cleanComp.includes('andrea')
+      cleanComp.includes('chiara menegotto') ||
+      cleanComp.includes('andrea menegotto') ||
+      cleanComp === 'chiara' ||
+      cleanComp === 'andrea'
     );
 
   let fixedCompilatore = rep.compilatore;

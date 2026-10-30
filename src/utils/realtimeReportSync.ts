@@ -301,13 +301,29 @@ export function safeMergeReport(
     merged.orarioTestoLibero = pickBetterText(current.orarioTestoLibero, incoming.orarioTestoLibero);
   }
 
-  // Protezione data
-  merged.data = pickBetterText(current.data, incoming.data);
+  // Protezione data del servizio: la modifica attiva del compilatore locale ha priorità
+  merged.data = current.data?.trim() || incoming.data?.trim() || '';
 
   // Protezione caposervizio e compilatore
-  merged.caposervizio = pickBetterText(current.caposervizio, incoming.caposervizio);
-  merged.compilatore = pickBetterText(current.compilatore, incoming.compilatore);
-  merged.firmaImmagineUrl = current.firmaImmagineUrl || incoming.firmaImmagineUrl;
+  // CRITICO: Non usare MAI pickBetterText su nomi/compilatore, altrimenti
+  // 'Chiara Menegotto' (16 car.) vince sempre su 'Andrea Menegotto' (15 car.) per lunghezza caratteri!
+  if (current.compilatore && current.compilatore.trim() && current.compilatore.trim().toLowerCase() !== 'compilatore') {
+    merged.compilatore = current.compilatore.trim();
+  } else if (incoming.compilatore && incoming.compilatore.trim() && incoming.compilatore.trim().toLowerCase() !== 'compilatore') {
+    merged.compilatore = incoming.compilatore.trim();
+  } else {
+    merged.compilatore = '';
+  }
+
+  if (current.caposervizio && current.caposervizio.trim() && current.caposervizio.trim().toLowerCase() !== 'caposervizio') {
+    merged.caposervizio = current.caposervizio.trim();
+  } else if (incoming.caposervizio && incoming.caposervizio.trim() && incoming.caposervizio.trim().toLowerCase() !== 'caposervizio') {
+    merged.caposervizio = incoming.caposervizio.trim();
+  } else {
+    merged.caposervizio = '';
+  }
+
+  merged.firmaImmagineUrl = current.firmaImmagineUrl || incoming.firmaImmagineUrl || '';
 
   // Protezione aperture sbarra inizio
   if (Array.isArray(current.apertureSbarraInizio) && Array.isArray(incoming.apertureSbarraInizio)) {
@@ -351,23 +367,55 @@ export function safeMergeReport(
   merged.note = pickBetterText(current.note, incoming.note);
   merged.osservazioni = pickBetterText(current.osservazioni, incoming.osservazioni);
 
-  // Protezione squadra: unisci i membri garantendo che presenze, caposervizio e compilatore non vengano cancellati
+  // Protezione squadra: unisci i membri garantendo che la designazione del compilatore sia univoca ed esatta
   if (Array.isArray(incoming.squadra) && incoming.squadra.length > 0) {
     const currentSquadraMap = new Map<string, any>();
     (current.squadra || []).forEach((m) => {
       if (m?.nomeCognome) currentSquadraMap.set(m.nomeCognome.trim().toLowerCase(), m);
     });
 
+    const activeCompName = (merged.compilatore || '').trim().toLowerCase();
+    const activeCapoName = (merged.caposervizio || '').trim().toLowerCase();
+
     const mergedSquadra: any[] = incoming.squadra.map((inM) => {
       const curM = currentSquadraMap.get(inM.nomeCognome.trim().toLowerCase());
-      if (!curM) return inM;
+      const mName = (inM.nomeCognome || '').trim().toLowerCase();
+
+      // Risolvi stato compilatore in modo univoco
+      let isComp = false;
+      if (activeCompName) {
+        isComp = mName === activeCompName;
+      } else {
+        isComp = curM ? Boolean(curM.isCompilatore) : Boolean(inM.isCompilatore);
+      }
+
+      // Risolvi stato caposervizio
+      let isCapo = false;
+      if (activeCapoName) {
+        isCapo = mName === activeCapoName;
+      } else {
+        isCapo = curM ? Boolean(curM.isCaposervizio) : Boolean(inM.isCaposervizio);
+      }
+
+      const isPres = Boolean((curM?.isPresente ?? inM.isPresente) || isComp || isCapo);
+
+      if (!curM) {
+        return {
+          ...inM,
+          isCompilatore: isComp,
+          isCaposervizio: isCapo,
+          isPresente: isPres,
+        };
+      }
+
       return {
         ...inM,
         orarioServizio: pickBetterText(curM.orarioServizio, inM.orarioServizio),
         note: pickBetterText(curM.note, inM.note),
         qualifica: inM.qualifica || curM.qualifica,
-        isCaposervizio: Boolean(inM.isCaposervizio || curM.isCaposervizio),
-        isCompilatore: Boolean(inM.isCompilatore || curM.isCompilatore),
+        isCaposervizio: isCapo,
+        isCompilatore: isComp,
+        isPresente: isPres,
       };
     });
 

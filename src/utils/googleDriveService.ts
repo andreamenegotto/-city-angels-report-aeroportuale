@@ -1223,8 +1223,8 @@ export async function scanDriveHierarchyRecursively(
           compilatore: num >= 35 ? 'Chiara Menegotto' : 'Andrea Menegotto',
           personaleEsternoAffiancamento: saracinoAff,
           squadra: [
-            { id: 'm1', nomeCognome: 'Andrea Menegotto', nickname: 'Tiger', qualifica: 'Caposervizio', orarioServizio: '20:30 - 01:30', isCaposervizio: true },
-            { id: 'm2', nomeCognome: num >= 35 ? 'Chiara Menegotto' : 'Chiara Pozzi', nickname: num >= 35 ? 'Mene' : 'Gabry', qualifica: 'Compilatore', orarioServizio: '20:30 - 01:30', isCompilatore: true },
+            { id: 'm1', nomeCognome: 'Andrea Menegotto', nickname: 'Tiger', qualifica: 'Caposervizio', orarioServizio: '20:30 - 01:30', isCaposervizio: true, isCompilatore: num < 35 },
+            { id: 'm2', nomeCognome: 'Chiara Menegotto', nickname: 'Mene', qualifica: 'Compilatore', orarioServizio: '20:30 - 01:30', isCompilatore: num >= 35 },
           ],
           rilevazioni: [
             {
