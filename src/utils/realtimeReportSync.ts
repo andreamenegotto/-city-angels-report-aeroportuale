@@ -367,19 +367,32 @@ export function safeMergeReport(
   merged.note = pickBetterText(current.note, incoming.note);
   merged.osservazioni = pickBetterText(current.osservazioni, incoming.osservazioni);
 
-  // Protezione squadra: unisci i membri garantendo che la designazione del compilatore sia univoca ed esatta
-  if (Array.isArray(incoming.squadra) && incoming.squadra.length > 0) {
-    const currentSquadraMap = new Map<string, any>();
-    (current.squadra || []).forEach((m) => {
-      if (m?.nomeCognome) currentSquadraMap.set(m.nomeCognome.trim().toLowerCase(), m);
-    });
+  // Protezione squadra: unisci i membri garantendo che nessun operatore aggiunto venga cancellato
+  const currentList = Array.isArray(current.squadra) ? current.squadra : [];
+  const incomingList = Array.isArray(incoming.squadra) ? incoming.squadra : [];
 
+  if (currentList.length > 0 || incomingList.length > 0) {
     const activeCompName = (merged.compilatore || '').trim().toLowerCase();
     const activeCapoName = (merged.caposervizio || '').trim().toLowerCase();
 
-    const mergedSquadra: any[] = incoming.squadra.map((inM) => {
-      const curM = currentSquadraMap.get(inM.nomeCognome.trim().toLowerCase());
-      const mName = (inM.nomeCognome || '').trim().toLowerCase();
+    const currentMap = new Map<string, any>();
+    currentList.forEach((m) => {
+      if (m?.id) currentMap.set(m.id, m);
+      if (m?.nomeCognome?.trim()) currentMap.set(m.nomeCognome.trim().toLowerCase(), m);
+    });
+
+    const mergedSquadra: any[] = [];
+    const processedIds = new Set<string>();
+    const processedNames = new Set<string>();
+
+    // 1. Processa i membri di incoming
+    incomingList.forEach((inM) => {
+      if (!inM) return;
+      const curM =
+        (inM.id ? currentMap.get(inM.id) : null) ||
+        (inM.nomeCognome?.trim() ? currentMap.get(inM.nomeCognome.trim().toLowerCase()) : null);
+
+      const mName = (pickBetterText(curM?.nomeCognome, inM.nomeCognome) || '').trim().toLowerCase();
 
       // Risolvi stato compilatore in modo univoco
       let isComp = false;
@@ -399,41 +412,44 @@ export function safeMergeReport(
 
       const isPres = Boolean((curM?.isPresente ?? inM.isPresente) || isComp || isCapo);
 
-      if (!curM) {
-        return {
-          ...inM,
-          isCompilatore: isComp,
-          isCaposervizio: isCapo,
-          isPresente: isPres,
-        };
-      }
-
-      return {
+      const mergedMember = {
         ...inM,
-        orarioServizio: pickBetterText(curM.orarioServizio, inM.orarioServizio),
-        note: pickBetterText(curM.note, inM.note),
-        qualifica: inM.qualifica || curM.qualifica,
+        id: inM.id || curM?.id || `ros-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        nomeCognome: pickBetterText(curM?.nomeCognome, inM.nomeCognome),
+        nickname: pickBetterText(curM?.nickname, inM.nickname),
+        qualifica: inM.qualifica || curM?.qualifica || 'Angelo semplice',
+        orarioServizio: pickBetterText(curM?.orarioServizio, inM.orarioServizio),
+        note: pickBetterText(curM?.note, inM.note),
         isCaposervizio: isCapo,
         isCompilatore: isComp,
         isPresente: isPres,
       };
+
+      mergedSquadra.push(mergedMember);
+      if (mergedMember.id) processedIds.add(mergedMember.id);
+      if (mergedMember.nomeCognome?.trim()) {
+        processedNames.add(mergedMember.nomeCognome.trim().toLowerCase());
+      }
     });
 
-    // Mantieni eventuali membri presenti in current non presenti in incoming
-    (current.squadra || []).forEach((curM) => {
-      if (
-        curM?.nomeCognome &&
-        !incoming.squadra.some(
-          (m) => m?.nomeCognome?.trim().toLowerCase() === curM.nomeCognome.trim().toLowerCase()
-        )
-      ) {
-        mergedSquadra.push(curM);
+    // 2. Mantieni TUTTI i membri presenti in current che non sono ancora in incoming (es. appena inseriti localmente)
+    currentList.forEach((curM) => {
+      if (!curM) return;
+      const hasId = curM.id && processedIds.has(curM.id);
+      const hasName = curM.nomeCognome?.trim() && processedNames.has(curM.nomeCognome.trim().toLowerCase());
+      if (!hasId && !hasName) {
+        mergedSquadra.push({
+          ...curM,
+          id: curM.id || `ros-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          qualifica: curM.qualifica || 'Angelo semplice',
+          isPresente: curM.isPresente ?? true,
+        });
+        if (curM.id) processedIds.add(curM.id);
+        if (curM.nomeCognome?.trim()) processedNames.add(curM.nomeCognome.trim().toLowerCase());
       }
     });
 
     merged.squadra = mergedSquadra;
-  } else if (Array.isArray(current.squadra)) {
-    merged.squadra = current.squadra;
   }
 
   return normalizeReportOrari(merged);

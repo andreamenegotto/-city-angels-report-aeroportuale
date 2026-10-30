@@ -52,6 +52,7 @@ import {
   DEFAULT_COOPERATIVA_CONFIG,
   DEFAULT_CORPORATE_CONFIG,
   DEFAULT_ROSTER,
+  ADDITIONAL_AVAILABLE_OPERATORS,
   DEFAULT_SAVED_PLATES,
   DEFAULT_SAVED_SIGNATURES,
   EMPTY_REPORT_DATA,
@@ -644,16 +645,24 @@ export default function App() {
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
   const [isCopiedShareUrl, setIsCopiedShareUrl] = useState<boolean>(false);
 
-  // Elenco Predefinito e Aggiornabile di Volontari e Operatori (Compilatori Ufficiali: Andrea Menegotto e Chiara Menegotto)
+  // Elenco Predefinito e Aggiornabile di Volontari e Operatori in Servizio
   const [roster, setRoster] = useState<RosterMember[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_ROSTER);
       if (saved) {
         let parsed: RosterMember[] = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Filtra tassativamente: mostra solo i compilatori e operatori ufficiali abilitati
-          const filtered = parsed.filter((r) => isOfficialCompiler(r.nomeCognome));
-          if (filtered.length >= 2) return filtered;
+          // Garantisci che Andrea e Chiara Menegotto siano sempre presenti nel roster
+          const hasAndrea = parsed.some((r) => (r.nomeCognome || '').toLowerCase().includes('andrea menegotto'));
+          const hasChiara = parsed.some((r) => (r.nomeCognome || '').toLowerCase().includes('chiara menegotto'));
+          const list = [...parsed];
+          if (!hasAndrea && DEFAULT_ROSTER[0]) list.unshift(DEFAULT_ROSTER[0]);
+          if (!hasChiara && DEFAULT_ROSTER[1]) {
+            const idx = list.findIndex((r) => (r.nomeCognome || '').toLowerCase().includes('andrea menegotto'));
+            if (idx !== -1) list.splice(idx + 1, 0, DEFAULT_ROSTER[1]);
+            else list.unshift(DEFAULT_ROSTER[1]);
+          }
+          return list;
         }
       }
     } catch {
@@ -770,21 +779,7 @@ export default function App() {
         if (parsed && typeof parsed.numeroReport === 'number') {
           const norm = normalizeReportOrari(parsed);
           if (norm.squadra && norm.squadra.length > 0) {
-            const filteredSquadra = norm.squadra.filter((m) => isOfficialCompiler(m.nomeCognome));
-            norm.squadra =
-              filteredSquadra.length > 0
-                ? alignSquadraToRosterOrder(filteredSquadra, DEFAULT_ROSTER)
-                : DEFAULT_ROSTER.map((r) => ({
-                    id: r.id,
-                    nomeCognome: r.nomeCognome,
-                    nickname: r.nickname,
-                    qualifica: r.qualifica,
-                    orarioServizio: '',
-                    note: '',
-                    isCaposervizio: r.nomeCognome === 'Andrea Menegotto',
-                    isCompilatore: r.nomeCognome === 'Andrea Menegotto',
-                    isPresente: true,
-                  }));
+            norm.squadra = alignSquadraToRosterOrder(norm.squadra, roster);
           }
           return norm;
         }
@@ -794,7 +789,7 @@ export default function App() {
     }
     const sampleNorm = normalizeReportOrari(SAMPLE_REPORT_DATA);
     if (sampleNorm.squadra && sampleNorm.squadra.length > 0) {
-      sampleNorm.squadra = alignSquadraToRosterOrder(sampleNorm.squadra, DEFAULT_ROSTER);
+      sampleNorm.squadra = alignSquadraToRosterOrder(sampleNorm.squadra, roster);
     }
     return sampleNorm;
   });
@@ -1406,6 +1401,47 @@ export default function App() {
       mergedReport.rilevazioni = sanitizeRilevazioniList(mergedReport.rilevazioni);
 
       if (mergedReport.squadra && mergedReport.squadra.length > 0) {
+        // Garantisci che qualsiasi operatore presente in squadra sia presente nel roster e memorizzato
+        setRoster((prevRoster) => {
+          const map = new Map<string, RosterMember>();
+          prevRoster.forEach((r) => {
+            if (r.id) map.set(r.id, r);
+            if (r.nomeCognome?.trim()) map.set(r.nomeCognome.trim().toLowerCase(), r);
+          });
+
+          const newRoster = [...prevRoster];
+          let changed = false;
+
+          mergedReport.squadra.forEach((m) => {
+            const hasById = m.id && map.has(m.id);
+            const hasByName = m.nomeCognome?.trim() && map.has(m.nomeCognome.trim().toLowerCase());
+            if (!hasById && !hasByName) {
+              const newRosterItem: RosterMember = {
+                id: m.id || `ros-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                nomeCognome: m.nomeCognome || '',
+                nickname: m.nickname || '',
+                qualifica: m.qualifica || 'Angelo semplice',
+                orarioServizio: m.orarioServizio || '',
+                isPresente: m.isPresente ?? true,
+                isCaposervizio: m.isCaposervizio || false,
+                isCompilatore: m.isCompilatore || false,
+              };
+              newRoster.push(newRosterItem);
+              if (newRosterItem.id) map.set(newRosterItem.id, newRosterItem);
+              if (newRosterItem.nomeCognome?.trim()) map.set(newRosterItem.nomeCognome.trim().toLowerCase(), newRosterItem);
+              changed = true;
+            }
+          });
+
+          if (changed) {
+            try {
+              localStorage.setItem(STORAGE_KEY_ROSTER, JSON.stringify(newRoster));
+            } catch {}
+            return newRoster;
+          }
+          return prevRoster;
+        });
+
         mergedReport.squadra = alignSquadraToRosterOrder(mergedReport.squadra, rosterRef.current);
       }
 
@@ -1715,6 +1751,14 @@ export default function App() {
   };
 
   const toggleRosterPresence = (member: RosterMember, checked: boolean) => {
+    setRoster((prev) => {
+      const next = prev.map((r) => (r.id === member.id ? { ...r, isPresente: checked } : r));
+      try {
+        localStorage.setItem(STORAGE_KEY_ROSTER, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
     setReport((prev) => {
       const exists = prev.squadra.some(
         (m) =>
@@ -1734,6 +1778,7 @@ export default function App() {
           note: '',
           isCaposervizio: member.isCaposervizio || false,
           isCompilatore: member.isCompilatore || false,
+          isPresente: true,
         };
         const aligned = alignSquadraToRosterOrder([...prev.squadra, added], rosterRef.current);
         return {
@@ -2126,58 +2171,97 @@ export default function App() {
     field: keyof Omit<RosterMember, 'id'>,
     value: string
   ) => {
-    setRoster((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
-    );
+    setRoster((prev) => {
+      const next = prev.map((item) => (item.id === id ? { ...item, [field]: value } : item));
+      try {
+        localStorage.setItem(STORAGE_KEY_ROSTER, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
 
-    setReport((prev) => ({
-      ...prev,
-      squadra: prev.squadra.map((m) => {
-        if (m.id !== id) return m;
-        if (field === 'nomeCognome') return { ...m, nomeCognome: value };
-        if (field === 'nickname') return { ...m, nickname: value };
-        if (field === 'qualifica') return { ...m, qualifica: value };
-        return m;
-      }),
-    }));
+    setReport((prev) => {
+      const existsInSquadra = (prev.squadra || []).some((m) => m.id === id);
+      const nextSquadra = existsInSquadra
+        ? prev.squadra.map((m) => {
+            if (m.id !== id) return m;
+            if (field === 'nomeCognome') return { ...m, nomeCognome: value };
+            if (field === 'nickname') return { ...m, nickname: value };
+            if (field === 'qualifica') return { ...m, qualifica: value };
+            return m;
+          })
+        : [
+            ...(prev.squadra || []),
+            {
+              id,
+              nomeCognome: field === 'nomeCognome' ? value : '',
+              nickname: field === 'nickname' ? value : '',
+              qualifica: field === 'qualifica' ? value : 'Angelo semplice',
+              orarioServizio: '',
+              isCaposervizio: false,
+              isCompilatore: false,
+              isPresente: true,
+            },
+          ];
+      return {
+        ...prev,
+        squadra: nextSquadra,
+      };
+    });
   };
 
-  const addNewRosterMember = () => {
+  const addNewRosterMember = (suggested?: Partial<RosterMember>) => {
     const newId = `ros-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const newMember: RosterMember = {
       id: newId,
-      nomeCognome: '',
-      nickname: '',
-      qualifica: 'Angelo semplice',
-      orarioServizio: '',
+      nomeCognome: suggested?.nomeCognome || '',
+      nickname: suggested?.nickname || '',
+      qualifica: suggested?.qualifica || 'Angelo semplice',
+      orarioServizio: suggested?.orarioServizio || '',
       isPresente: true,
-      isCaposervizio: false,
+      isCaposervizio: suggested?.isCaposervizio || false,
       isCompilatore: false,
     };
-    setRoster((prev) => [...prev, newMember]);
+    setRoster((prev) => {
+      const next = [...prev, newMember];
+      try {
+        localStorage.setItem(STORAGE_KEY_ROSTER, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
     setReport((prev) => ({
       ...prev,
       squadra: [
-        ...prev.squadra,
+        ...(prev.squadra || []),
         {
           id: newId,
-          nomeCognome: '',
-          nickname: '',
-          qualifica: 'Angelo semplice',
-          orarioServizio: '',
-          isCaposervizio: false,
+          nomeCognome: suggested?.nomeCognome || '',
+          nickname: suggested?.nickname || '',
+          qualifica: suggested?.qualifica || 'Angelo semplice',
+          orarioServizio: suggested?.orarioServizio || '',
+          isCaposervizio: suggested?.isCaposervizio || false,
           isCompilatore: false,
+          isPresente: true,
         },
       ],
     }));
-    showNotice('Nuovo operatore aggiunto in fondo alla tabella.');
+    showNotice(
+      suggested?.nomeCognome
+        ? `Operatore "${suggested.nomeCognome}" aggiunto alla squadra.`
+        : 'Nuova riga operatore aggiunta: inserisci liberamente Nome, Nickname e Qualifica.'
+    );
   };
 
   const removeRosterMember = (id: string) => {
-    setRoster((prev) => prev.filter((item) => item.id !== id));
+    setRoster((prev) => {
+      const next = prev.filter((item) => item.id !== id);
+      try {
+        localStorage.setItem(STORAGE_KEY_ROSTER, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
     setReport((prev) => ({
       ...prev,
-      squadra: prev.squadra.filter((m) => m.id !== id),
+      squadra: (prev.squadra || []).filter((m) => m.id !== id),
     }));
   };
 
@@ -4365,15 +4449,39 @@ export default function App() {
                     Spunta la casella <strong>Presente</strong> per chi è in turno e spunta chi è il <strong>Compilatore</strong>: la relativa firma ufficiale verrà collegata automaticamente per la stampa del documento A4.
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
-                    onClick={addNewRosterMember}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-slate-800 bg-slate-100 border border-slate-300 rounded hover:bg-slate-200 cursor-pointer"
+                    onClick={() => addNewRosterMember()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded hover:bg-slate-100 shadow-2xs cursor-pointer"
+                    title="Aggiungi una nuova riga libera per qualsiasi volontario o operatore"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Aggiungi Operatore</span>
+                    <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>+ Aggiungi Operatore Libero</span>
                   </button>
+                  <select
+                    onChange={(e) => {
+                      const selectedName = e.target.value;
+                      if (!selectedName) return;
+                      const found = ADDITIONAL_AVAILABLE_OPERATORS.find((o) => o.nomeCognome === selectedName);
+                      if (found) {
+                        addNewRosterMember(found);
+                      }
+                      e.target.value = '';
+                    }}
+                    defaultValue=""
+                    className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded text-slate-700 font-medium cursor-pointer"
+                    title="Seleziona un volontario registrato in archivio per aggiungerlo rapidamente alla squadra"
+                  >
+                    <option value="" disabled>+ Aggiungi Volontario da Archivio...</option>
+                    {ADDITIONAL_AVAILABLE_OPERATORS.filter(
+                      (op) => !roster.some((r) => r.nomeCognome?.toLowerCase().trim() === op.nomeCognome.toLowerCase().trim())
+                    ).map((op) => (
+                      <option key={op.id} value={op.nomeCognome}>
+                        {op.nomeCognome} ({op.nickname})
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
