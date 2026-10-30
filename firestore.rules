@@ -1,0 +1,55 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Registered users (both official roster and newly learned names)
+    match /registered_users/{userId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.nomeCognome is string 
+        && request.resource.data.nomeCognome.size() >= 1 
+        && request.resource.data.nomeCognome.size() <= 120;
+      allow delete: if true;
+    }
+    
+    // Monitored locations (both initial airport locations and newly learned locations)
+    match /monitored_locations/{locationId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.name is string 
+        && request.resource.data.name.size() >= 1 
+        && request.resource.data.name.size() <= 150;
+      allow delete: if true;
+    }
+
+    // App shared configuration (e.g. shared Google Drive folder URL for all collaborators)
+    match /app_settings/{settingId} {
+      allow read, write: if true;
+    }
+
+    // Saved signatures of compilers (Andrea Menegotto, Chiara Menegotto, Chiara Pozzi)
+    match /saved_signatures/{signatureId} {
+      allow read, write: if true;
+    }
+    
+    // Active draft report being compiled in real-time across multiple devices (PC, Android phones)
+    match /active_draft_reports/{draftId} {
+      allow read, write: if true;
+    }
+    
+    // Shared archive of all historical reports synchronized in real-time across all devices (PC & Android)
+    match /app_shared_archive/{docId} {
+      allow read, write: if true;
+    }
+    
+    match /shared_history_reports/{reportId} {
+      allow read, write: if true;
+    }
+    
+    match /app_shared_data/{docId} {
+      allow read, write: if true;
+    }
+    
+    // Default catch-all deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

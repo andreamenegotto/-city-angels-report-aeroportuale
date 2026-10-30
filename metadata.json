@@ -1,0 +1,6 @@
+{
+  "name": "City Angels - Report di Servizio Aeroportuale",
+  "description": "Applicativo gestionale per la compilazione, il calcolo automatico e la generazione in PDF (A4 multipagina) del Report di Servizio aeroportuale dei City Angels.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

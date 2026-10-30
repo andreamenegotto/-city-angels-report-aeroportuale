@@ -1,0 +1,218 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    color: #0f172a;
+    background-color: #f1f5f9;
+    margin: 0;
+    padding: 0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+.font-mono-tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Visible, clean custom scrollbar for modal dialogs and scroll containers */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #64748b #f1f5f9;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 6px;
+  border: 2px solid #f1f5f9;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Fixed Photo Thumbnail Rule (Screen & Print: max-width 150px, object-fit: cover) */
+.report-photo-frame {
+  width: 150px;
+  max-width: 150px;
+  height: 112px;
+  max-height: 112px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  background-color: #f8fafc;
+  flex-shrink: 0;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.report-photo-img {
+  width: 100%;
+  height: 100%;
+  max-width: 150px;
+  object-fit: cover;
+  display: block;
+}
+
+/* A4 Sheet Geometry for Preview & Print - Calibrated so nothing is ever cut off */
+.a4-sheet {
+  width: 210mm;
+  min-width: 210mm;
+  max-width: 210mm;
+  min-height: 297mm;
+  padding: 11mm 13mm;
+  margin-left: auto;
+  margin-right: auto;
+  background: #ffffff;
+  color: #0f172a;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Print-Specific Styles (@media print) */
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+
+@media print {
+  html,
+  body {
+    width: 210mm !important;
+    height: auto !important;
+    min-height: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide screen chrome, toolbar controls, offscreen measurement nodes */
+  .no-print,
+  .print\:hidden,
+  [aria-hidden="true"],
+  .measurement-node,
+  header.no-print,
+  footer.no-print,
+  nav {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 210mm !important;
+    max-width: 210mm !important;
+    display: block !important;
+    background: transparent !important;
+  }
+
+  .print-only-root {
+    display: block !important;
+    width: 210mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Explicitly preserve document page headers and footers */
+  .a4-doc-header,
+  .a4-doc-footer {
+    display: block !important;
+    visibility: visible !important;
+  }
+
+  .a4-page,
+  .a4-sheet {
+    width: 210mm !important;
+    min-width: 210mm !important;
+    max-width: 210mm !important;
+    height: 296mm !important;
+    min-height: 296mm !important;
+    max-height: 296mm !important;
+    padding: 10mm 12mm !important;
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border: none !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    overflow: hidden !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Never emit a trailing blank page after the final sheet */
+  .a4-page:last-child,
+  .a4-sheet:last-child {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  .report-photo-frame {
+    width: 150px !important;
+    max-width: 150px !important;
+    height: 112px !important;
+    max-height: 112px !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .report-photo-img {
+    width: 150px !important;
+    max-width: 150px !important;
+    height: 112px !important;
+    object-fit: cover !important;
+  }
+
+  /* Crisply rendered print logo without distortion or artificial borders */
+  .print-logo-container {
+    display: inline-flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    margin: 0 auto !important;
+    page-break-inside: avoid !important;
+  }
+
+  .print-logo-container img {
+    image-rendering: -webkit-optimize-contrast !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    max-height: 75px !important;
+    width: auto !important;
+    object-fit: contain !important;
+    display: block !important;
+    margin: 0 auto !important;
+  }
+}

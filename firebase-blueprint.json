@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user in the official or learned registry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nomeCognome": { "type": "string" }
+      },
+      "required": ["nomeCognome"]
+    },
+    "Location": {
+      "title": "Location",
+      "description": "A monitored location of finding / detection",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "ActiveDraftReport": {
+      "title": "ActiveDraftReport",
+      "description": "Real-time collaborative draft report currently being compiled across devices",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "report": { "type": "object" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" },
+        "clientId": { "type": "string" }
+      },
+      "required": ["report", "updatedAt"]
+    },
+    "SharedArchive": {
+      "title": "SharedArchive",
+      "description": "Complete historical reports archive synchronized across all devices and accounts",
+      "type": "object",
+      "properties": {
+        "reports": { "type": "array" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["reports"]
+    }
+  },
+  "firestore": {
+    "/registered_users/{userId}": {
+      "schema": { "$ref": "User" },
+      "description": "Collection of registered users"
+    },
+    "/monitored_locations/{locationId}": {
+      "schema": { "$ref": "Location" },
+      "description": "Collection of known and dynamically learned locations"
+    },
+    "/active_draft_reports/{draftId}": {
+      "schema": { "$ref": "ActiveDraftReport" },
+      "description": "Collection for real-time collaborative draft synchronization across devices"
+    },
+    "/app_shared_archive/{docId}": {
+      "schema": { "$ref": "SharedArchive" },
+      "description": "Shared historical reports archive synchronized across PC and Android"
+    }
+  }
+}
