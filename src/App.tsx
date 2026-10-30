@@ -99,6 +99,7 @@ import {
   getStoredDriveFolderUrl,
   googleSignIn,
   initAuth,
+  logoutGoogle,
   loadHistoricalReportsFromDriveFolder,
   subscribeToDriveFolderUrl,
 } from './utils/googleDriveService';
@@ -2301,35 +2302,53 @@ export default function App() {
     }
   };
 
-  const handleDriveQuickConnect = async () => {
-    try {
-      const res = await googleSignIn();
-      if (res?.accessToken) {
-        setIsDriveLoggedIn(true);
-        setDriveUser(res.user);
-        showNotice(`Google Drive connesso con successo (${res.user.email || res.user.displayName}).`);
-        const savedFolderUrl = getStoredDriveFolderUrl();
-        const folderId = extractDriveFolderId(savedFolderUrl);
-        if (folderId) {
-          const { files, reports } = await loadHistoricalReportsFromDriveFolder(folderId);
-          setDriveFilesList(files);
-          if (reports.length > 0) {
-            setHistoryReports((prev) => {
-              const merged = mergeReportEntries(prev, reports);
-              const userLabel =
-                res.user?.displayName
-                  ? `${res.user.displayName} (${res.user.email || ''})`.trim()
-                  : (res.user?.email || 'Google Drive Sync');
-              pushSharedArchiveToCloud(merged, userLabel).catch(() => {});
-              return merged;
-            });
+  const [isDriveConnecting, setIsDriveConnecting] = useState<boolean>(false);
+
+  const handleDriveToggleConnect = async () => {
+    if (isDriveLoggedIn) {
+      try {
+        await logoutGoogle();
+        setIsDriveLoggedIn(false);
+        setDriveUser(null);
+        showNotice('Google Drive disconnesso.');
+      } catch (err: any) {
+        console.warn('Errore disconnessione Drive:', err);
+      }
+    } else {
+      try {
+        setIsDriveConnecting(true);
+        const res = await googleSignIn();
+        if (res?.accessToken) {
+          setIsDriveLoggedIn(true);
+          setDriveUser(res.user);
+          showNotice(`Google Drive connesso con successo (${res.user.email || res.user.displayName}).`);
+          const savedFolderUrl = getStoredDriveFolderUrl();
+          const folderId = extractDriveFolderId(savedFolderUrl);
+          if (folderId) {
+            const { files, reports } = await loadHistoricalReportsFromDriveFolder(folderId);
+            setDriveFilesList(files);
+            if (reports.length > 0) {
+              setHistoryReports((prev) => {
+                const merged = mergeReportEntries(prev, reports);
+                const userLabel =
+                  res.user?.displayName
+                    ? `${res.user.displayName} (${res.user.email || ''})`.trim()
+                    : (res.user?.email || 'Google Drive Sync');
+                pushSharedArchiveToCloud(merged, userLabel).catch(() => {});
+                return merged;
+              });
+            }
           }
         }
+      } catch (err: any) {
+        showNotice(err?.message || 'Accesso Google Drive non completato.');
+      } finally {
+        setIsDriveConnecting(false);
       }
-    } catch (err: any) {
-      console.warn('Connessione Drive annullata:', err);
     }
   };
+
+  const handleDriveQuickConnect = handleDriveToggleConnect;
 
   // Archiviazione diretta nella sottocartella 2026 di Google Drive
   const handleArchiveToDrive2026 = async () => {
@@ -3078,18 +3097,43 @@ export default function App() {
             <Users className="w-3.5 h-3.5 text-red-500" />
             <span>Registri (Utenti & Luoghi)</span>
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('drive')}
-            className={`py-1 transition-colors border-b-2 cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'drive'
-                ? 'border-[#df0a14] text-white'
-                : 'border-transparent text-slate-300 hover:text-white'
-            }`}
-          >
-            <CloudUpload className="w-3.5 h-3.5 text-blue-400" />
-            <span>Google Drive</span>
-          </button>
+          {/* TAB GOOGLE DRIVE CON STATO REALE (CONNESSO / DISCONNESSO) */}
+          <div className="flex items-center gap-1.5 py-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab('drive')}
+              className={`transition-colors border-b-2 cursor-pointer flex items-center gap-1.5 pb-0.5 ${
+                activeTab === 'drive'
+                  ? 'border-[#df0a14] text-white font-bold'
+                  : 'border-transparent text-slate-300 hover:text-white'
+              }`}
+            >
+              <CloudUpload className="w-3.5 h-3.5 text-blue-400" />
+              <span>Google Drive</span>
+            </button>
+            {isDriveLoggedIn ? (
+              <button
+                type="button"
+                onClick={handleDriveToggleConnect}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/60 rounded cursor-pointer transition-colors"
+                title={`Google Drive: Connesso (${driveUser?.email || driveUser?.displayName || 'Autenticato'}). Clicca per disconnettere.`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span>Connesso</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleDriveToggleConnect}
+                disabled={isDriveConnecting}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded cursor-pointer transition-colors"
+                title="Google Drive: Disconnesso. Clicca per connettere il tuo account Google."
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                <span>{isDriveConnecting ? 'Accesso...' : 'Disconnesso'}</span>
+              </button>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => setActiveTab('stats')}
@@ -3155,26 +3199,6 @@ export default function App() {
             <span className="hidden sm:inline">Condividi App</span>
           </button>
 
-          {/* Indicatore di connessione costante a Google Drive */}
-          {isDriveLoggedIn ? (
-            <div
-              className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-emerald-300 bg-emerald-950/70 border border-emerald-500/40 rounded shadow-xs"
-              title={`Google Drive Connesso costantemente${driveUser?.email ? ` (${driveUser.email})` : ''}`}
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>Drive Connesso</span>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={handleDriveQuickConnect}
-              className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-blue-200 bg-blue-950/70 hover:bg-blue-900/80 border border-blue-400/40 rounded transition-colors cursor-pointer shadow-xs"
-              title="Clicca per collegare il tuo account Google Drive"
-            >
-              <CloudUpload className="w-3.5 h-3.5 text-blue-300" />
-              <span>Connetti Drive</span>
-            </button>
-          )}
 
           <button
             type="button"
@@ -3297,16 +3321,31 @@ export default function App() {
           <Users className="w-3.5 h-3.5 text-red-500" />
           <span>Registri (Utenti & Luoghi)</span>
         </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('drive')}
-          className={`px-3 py-1.5 rounded whitespace-nowrap flex items-center gap-1 ${
-            activeTab === 'drive' ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
-          }`}
-        >
-          <CloudUpload className="w-3 h-3 text-blue-500" />
-          <span>Google Drive</span>
-        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => setActiveTab('drive')}
+            className={`px-3 py-1.5 rounded whitespace-nowrap flex items-center gap-1 ${
+              activeTab === 'drive' ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <CloudUpload className="w-3 h-3 text-blue-500" />
+            <span>Google Drive</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleDriveToggleConnect}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer ${
+              isDriveLoggedIn
+                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                : 'bg-slate-200 text-slate-700 border border-slate-300'
+            }`}
+            title={isDriveLoggedIn ? 'Google Drive connesso. Tocca per disconnettere.' : 'Google Drive disconnesso. Tocca per connettere.'}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${isDriveLoggedIn ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+            <span>{isDriveLoggedIn ? 'Connesso' : 'Disconnesso'}</span>
+          </button>
+        </div>
         <button
           type="button"
           onClick={() => setActiveTab('stats')}
@@ -4852,7 +4891,6 @@ export default function App() {
               isDriveConnected={isDriveLoggedIn || driveFilesList.length > 0}
               onDriveFilesUpdated={(files) => {
                 setDriveFilesList(files);
-                setIsDriveLoggedIn(true);
               }}
               onAddSubjectToDirectory={(name) => {
                 if (name && !customSubjects.includes(name)) {
@@ -4913,7 +4951,6 @@ export default function App() {
               }}
               onDriveFilesUpdated={(files) => {
                 setDriveFilesList(files);
-                setIsDriveLoggedIn(true);
               }}
               onLocalArchiveReport={() => saveCurrentReportToHistory(false)}
               onNotice={showNotice}

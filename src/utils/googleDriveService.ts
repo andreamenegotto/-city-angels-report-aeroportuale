@@ -252,6 +252,47 @@ export const clearAccessToken = () => {
 };
 
 /**
+ * Verifica effettiva del token OAuth presso l'endpoint ufficiale di Google.
+ * Restituisce true SOLO se il token è valido e non scaduto.
+ */
+export const verifyGoogleToken = async (token: string): Promise<boolean> => {
+  if (!token || typeof token !== 'string' || token.trim().length === 0) return false;
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(token.trim())}`
+    );
+    if (res.ok) {
+      const data = await res.json();
+      return !!(data?.aud || data?.sub || data?.email);
+    }
+    return false;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Controlla lo stato reale e veritiero della connessione a Google Drive.
+ */
+export const checkDriveConnectionStatus = async (): Promise<{
+  connected: boolean;
+  user: { email?: string; displayName?: string } | null;
+}> => {
+  const token = await getAccessToken();
+  if (!token) {
+    return { connected: false, user: null };
+  }
+  const isValid = await verifyGoogleToken(token);
+  if (!isValid) {
+    clearAccessToken();
+    clearStoredUserProfile();
+    return { connected: false, user: null };
+  }
+  const profile = getStoredUserProfile();
+  return { connected: true, user: profile };
+};
+
+/**
  * Assicura che esista un token di accesso valido a Google Drive,
  * richiedendo l'accesso se necessario.
  */
@@ -425,37 +466,48 @@ export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
-  // 1. Ripristina token e profilo salvati (GIS o Firebase)
-  const storedToken =
-    cachedAccessToken ||
-    (() => {
-      try {
-        const saved =
-          localStorage.getItem(STORAGE_KEY_OAUTH_TOKEN) ||
-          sessionStorage.getItem(STORAGE_KEY_OAUTH_TOKEN);
-        const expiry =
-          localStorage.getItem(STORAGE_KEY_OAUTH_EXPIRY) ||
-          sessionStorage.getItem(STORAGE_KEY_OAUTH_EXPIRY);
-        if (saved && expiry && parseInt(expiry, 10) > Date.now()) return saved;
-      } catch {
-        // ignore
-      }
-      return null;
-    })();
+  let isCancelled = false;
 
-  const storedProfile = getStoredUserProfile();
-  if (storedToken && storedProfile) {
-    const mockUser = {
-      uid: 'google-oauth-user',
-      email: storedProfile.email || 'am@andreamenegotto.it',
-      displayName: storedProfile.displayName || 'Andrea Menegotto',
-    } as unknown as User;
-    if (onAuthSuccess) onAuthSuccess(mockUser, storedToken);
-  }
+  // 1. Verifica token salvato con Google Identity Services / tokeninfo
+  const checkStoredAuth = async () => {
+    const token = await getAccessToken();
+    if (!token) {
+      if (!isCancelled && onAuthFailure) onAuthFailure();
+      return;
+    }
+
+    // Effettua la verifica reale con Google
+    const isValid = await verifyGoogleToken(token);
+    if (isCancelled) return;
+
+    if (isValid) {
+      const storedProfile = getStoredUserProfile();
+      const mockUser = {
+        uid: 'google-oauth-user',
+        email: storedProfile?.email || 'am@andreamenegotto.it',
+        displayName: storedProfile?.displayName || 'Andrea Menegotto',
+      } as unknown as User;
+      if (onAuthSuccess) onAuthSuccess(mockUser, token);
+    } else {
+      // Token non valido o scaduto: ripulisci e segnala disconnessione
+      clearAccessToken();
+      clearStoredUserProfile();
+      if (onAuthFailure) onAuthFailure();
+    }
+  };
+
+  checkStoredAuth().catch(() => {
+    if (!isCancelled) {
+      clearAccessToken();
+      clearStoredUserProfile();
+      if (onAuthFailure) onAuthFailure();
+    }
+  });
 
   // 2. Gestione del redirect su smartphone o browser con blocco popup
   getRedirectResult(auth)
-    .then((result) => {
+    .then(async (result) => {
+      if (isCancelled) return;
       if (result) {
         const credential = GoogleAuthProvider.credentialFromResult(result);
         if (credential?.accessToken) {
@@ -474,28 +526,42 @@ export const initAuth = (
       console.warn('Controllo redirect Google Auth:', err);
     });
 
-  return onAuthStateChanged(auth, async (user: User | null) => {
+  const unsubFirebase = onAuthStateChanged(auth, async (user: User | null) => {
+    if (isCancelled) return;
     if (user) {
       const token = await getAccessToken();
       if (token) {
-        if (user.email || user.displayName) {
-          saveStoredUserProfile({
-            email: user.email || '',
-            displayName: user.displayName || '',
-          });
+        const isValid = await verifyGoogleToken(token);
+        if (isCancelled) return;
+        if (isValid) {
+          if (user.email || user.displayName) {
+            saveStoredUserProfile({
+              email: user.email || '',
+              displayName: user.displayName || '',
+            });
+          }
+          if (onAuthSuccess) onAuthSuccess(user, token);
+          return;
         }
-        if (onAuthSuccess) onAuthSuccess(user, token);
-      } else if (!isSigningIn) {
-        if (onAuthFailure) onAuthFailure();
+      }
+      if (!isSigningIn && onAuthFailure) {
+        onAuthFailure();
       }
     } else {
-      if (!storedToken) {
+      // Nessun utente Firebase: controlliamo se c'è un token GIS valido
+      const token = await getAccessToken();
+      if (!token) {
         clearAccessToken();
         clearStoredUserProfile();
         if (onAuthFailure) onAuthFailure();
       }
     }
   });
+
+  return () => {
+    isCancelled = true;
+    unsubFirebase();
+  };
 };
 
 export const googleSignIn = async (): Promise<{
@@ -575,8 +641,13 @@ export const getAccessToken = async (): Promise<string | null> => {
 };
 
 export const logoutGoogle = async () => {
-  await auth.signOut();
+  try {
+    await auth.signOut();
+  } catch {
+    // ignore
+  }
   clearAccessToken();
+  clearStoredUserProfile();
 };
 
 /**

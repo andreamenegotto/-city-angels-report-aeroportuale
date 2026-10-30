@@ -242,9 +242,15 @@ export const GoogleDriveArchivePanel: React.FC<GoogleDriveArchivePanelProps> = (
             <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
               Archiviazione in Cartella Condivisa Google Drive
             </h2>
-            {hasToken && driveUser && (
-              <span className="px-2 py-0.5 text-[11px] font-semibold bg-emerald-100 text-emerald-900 rounded">
-                Connesso: {driveUser.email || driveUser.displayName}
+            {hasToken && driveUser ? (
+              <span className="px-2 py-0.5 text-[11px] font-semibold bg-emerald-100 text-emerald-900 border border-emerald-300 rounded flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span>Connesso: {driveUser.email || driveUser.displayName}</span>
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-300 rounded flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                <span>Stato: Disconnesso</span>
               </span>
             )}
           </div>
