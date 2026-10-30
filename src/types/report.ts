@@ -213,8 +213,7 @@ export const DEFAULT_CORPORATE_CONFIG: CorporateHeaderConfig = {
 };
 
 /**
- * Squadra pre-compilata con i 6 operatori ufficiali e le relative qualifiche.
- * Nessun orario o ruolo specifico della serata è pre-impostato.
+ * Squadra pre-compilata con i compilatori e operatori ufficiali (Andrea Menegotto e Chiara Menegotto).
  */
 export const DEFAULT_ROSTER: RosterMember[] = [
   {
@@ -225,22 +224,11 @@ export const DEFAULT_ROSTER: RosterMember[] = [
       'Coordinatore CA Provincia di Varese - Presidente Coop., Consulente e Formatore esperto in compliance, safety, security e autodifesa',
     orarioServizio: '',
     isPresente: true,
-    isCaposervizio: false,
-    isCompilatore: false,
+    isCaposervizio: true,
+    isCompilatore: true,
   },
   {
     id: 'op-2',
-    nomeCognome: 'Ambra Mazzoni',
-    nickname: 'Trilly',
-    qualifica:
-      "Coordinatrice Varese città - Amministratore Cooperativa, Operatrice d'Emergenza, Counsellor",
-    orarioServizio: '',
-    isPresente: true,
-    isCaposervizio: false,
-    isCompilatore: false,
-  },
-  {
-    id: 'op-3',
     nomeCognome: 'Chiara Menegotto',
     nickname: 'Mene',
     qualifica:
@@ -250,14 +238,28 @@ export const DEFAULT_ROSTER: RosterMember[] = [
     isCaposervizio: false,
     isCompilatore: false,
   },
+];
+
+export const ADDITIONAL_AVAILABLE_OPERATORS: RosterMember[] = [
   {
-    id: 'op-4',
+    id: 'op-3',
     nomeCognome: 'Chiara Pozzi',
     nickname: 'Gabry',
     qualifica:
       'Coordinatrice CA Sezioni Busto Arsizio - Gallarate, Vice Presidente Coop., Psicologa Clinica - area Neuropsicologia - esperta in Psicologia Giuridica',
     orarioServizio: '',
-    isPresente: true,
+    isPresente: false,
+    isCaposervizio: false,
+    isCompilatore: false,
+  },
+  {
+    id: 'op-4',
+    nomeCognome: 'Ambra Mazzoni',
+    nickname: 'Trilly',
+    qualifica:
+      "Coordinatrice Varese città - Amministratore Cooperativa, Operatrice d'Emergenza, Counsellor",
+    orarioServizio: '',
+    isPresente: false,
     isCaposervizio: false,
     isCompilatore: false,
   },
@@ -267,7 +269,7 @@ export const DEFAULT_ROSTER: RosterMember[] = [
     nickname: 'Brando',
     qualifica: 'Caposquadra CA',
     orarioServizio: '',
-    isPresente: true,
+    isPresente: false,
     isCaposervizio: false,
     isCompilatore: false,
   },
@@ -277,7 +279,7 @@ export const DEFAULT_ROSTER: RosterMember[] = [
     nickname: 'Spider',
     qualifica: 'Angelo semplice, Avvocato',
     orarioServizio: '',
-    isPresente: true,
+    isPresente: false,
     isCaposervizio: false,
     isCompilatore: false,
   },
@@ -287,7 +289,7 @@ export const DEFAULT_ROSTER: RosterMember[] = [
     nickname: 'Diana',
     qualifica: 'Angelo semplice',
     orarioServizio: '',
-    isPresente: true,
+    isPresente: false,
     isCaposervizio: false,
     isCompilatore: false,
   },

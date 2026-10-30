@@ -297,10 +297,6 @@ export const isOfficialCompiler = (name?: string): boolean => {
 export const KNOWN_OPERATORS = [
   { name: 'Andrea Menegotto', nickname: 'Tiger', role: 'Coordinatore CA Prov. Varese' },
   { name: 'Chiara Menegotto', nickname: 'Mene', role: 'Resp. Operativo Prov. Varese' },
-  { name: 'Chiara Pozzi', nickname: 'Gabry', role: 'Coordinatrice Sezioni Busto - Gallarate' },
-  { name: 'Ambra Mazzoni', nickname: 'Trilly', role: 'Coordinatrice Varese città' },
-  { name: 'Fabio "Guerriero"', nickname: 'Guerriero', role: 'Caposquadra' },
-  { name: 'Stefania Massarenti', nickname: 'Diana', role: 'Angelo semplice' },
 ];
 
 /**
@@ -585,9 +581,11 @@ function recoverSavedSignatures(): SavedSignature[] {
     }
   });
 
-  // Aggiungi eventuali altre firme registrate
+  // Aggiungi solo firme dei compilatori ufficiali autorizzati
   map.forEach((sig) => {
-    orderedResult.push(sig);
+    if (isOfficialCompiler(sig.nomeOperatore)) {
+      orderedResult.push(sig);
+    }
   });
 
   return orderedResult;
@@ -646,44 +644,16 @@ export default function App() {
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
   const [isCopiedShareUrl, setIsCopiedShareUrl] = useState<boolean>(false);
 
-  // Elenco Predefinito e Aggiornabile di Volontari e Operatori (7 ufficiali predefiniti con frecce per l'ordinamento)
+  // Elenco Predefinito e Aggiornabile di Volontari e Operatori (Compilatori Ufficiali: Andrea Menegotto e Chiara Menegotto)
   const [roster, setRoster] = useState<RosterMember[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_ROSTER);
       if (saved) {
         let parsed: RosterMember[] = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Verifica presenza Stefania Massarenti (Diana), se assente la aggiunge
-          const hasStefania = parsed.some(
-            (r) =>
-              (r.nomeCognome || '').toLowerCase().includes('massarenti') ||
-              (r.nickname || '').toLowerCase() === 'diana'
-          );
-          if (!hasStefania) {
-            parsed.push({
-              id: 'op-7',
-              nomeCognome: 'Stefania Massarenti',
-              nickname: 'Diana',
-              qualifica: 'Angelo semplice',
-              orarioServizio: '',
-              isPresente: true,
-              isCaposervizio: false,
-              isCompilatore: false,
-            });
-          }
-
-          // Correzione anomalia Report 37: se Stefania Massarenti (Diana) è erroneamente in cima (indice 0),
-          // riposizionala dopo i coordinatori storici in coda
-          const firstMember = parsed[0];
-          const isFirstDiana =
-            (firstMember?.nomeCognome || '').toLowerCase().includes('massarenti') ||
-            (firstMember?.nickname || '').toLowerCase() === 'diana';
-          if (isFirstDiana) {
-            const diana = parsed.shift()!;
-            parsed.push(diana);
-          }
-
-          return parsed;
+          // Filtra tassativamente: mostra solo i compilatori e operatori ufficiali abilitati
+          const filtered = parsed.filter((r) => isOfficialCompiler(r.nomeCognome));
+          if (filtered.length >= 2) return filtered;
         }
       }
     } catch {
@@ -800,7 +770,21 @@ export default function App() {
         if (parsed && typeof parsed.numeroReport === 'number') {
           const norm = normalizeReportOrari(parsed);
           if (norm.squadra && norm.squadra.length > 0) {
-            norm.squadra = alignSquadraToRosterOrder(norm.squadra, roster);
+            const filteredSquadra = norm.squadra.filter((m) => isOfficialCompiler(m.nomeCognome));
+            norm.squadra =
+              filteredSquadra.length > 0
+                ? alignSquadraToRosterOrder(filteredSquadra, DEFAULT_ROSTER)
+                : DEFAULT_ROSTER.map((r) => ({
+                    id: r.id,
+                    nomeCognome: r.nomeCognome,
+                    nickname: r.nickname,
+                    qualifica: r.qualifica,
+                    orarioServizio: '',
+                    note: '',
+                    isCaposervizio: r.nomeCognome === 'Andrea Menegotto',
+                    isCompilatore: r.nomeCognome === 'Andrea Menegotto',
+                    isPresente: true,
+                  }));
           }
           return norm;
         }
@@ -810,7 +794,7 @@ export default function App() {
     }
     const sampleNorm = normalizeReportOrari(SAMPLE_REPORT_DATA);
     if (sampleNorm.squadra && sampleNorm.squadra.length > 0) {
-      sampleNorm.squadra = alignSquadraToRosterOrder(sampleNorm.squadra, roster);
+      sampleNorm.squadra = alignSquadraToRosterOrder(sampleNorm.squadra, DEFAULT_ROSTER);
     }
     return sampleNorm;
   });
@@ -993,7 +977,7 @@ export default function App() {
               map.delete(p.toLowerCase());
             }
           });
-          map.forEach((sig) => ordered.push(sig));
+          // Solo i 2 compilatori ufficiali vengono inclusi
           return ordered;
         });
       },
@@ -5860,7 +5844,9 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                    {savedSignatures.map((sig) => {
+                    {savedSignatures
+                      .filter((sig) => isOfficialCompiler(sig.nomeOperatore))
+                      .map((sig) => {
                       const isCurrentReportSignature = report.firmaImmagineUrl === sig.immagineUrl;
                       const isCustomImage =
                         typeof sig.immagineUrl === 'string' &&
@@ -5994,14 +5980,13 @@ export default function App() {
                           setNewSigLabel(`Firma Scansionata - ${e.target.value}`);
                         }
                       }}
-                      className="w-full h-8 px-2 text-xs bg-white border border-slate-300 rounded"
+                      className="w-full h-8 px-2 text-xs bg-white border border-slate-300 rounded font-semibold text-slate-800"
                     >
-                      {roster.map((r) => (
-                        <option key={r.id} value={r.nomeCognome}>
-                          {r.nomeCognome} ({r.nickname || 'Operatore'})
+                      {OFFICIAL_COMPILERS.map((c) => (
+                        <option key={c.name} value={c.name}>
+                          {c.name} ({c.nickname})
                         </option>
                       ))}
-                      <option value="Altro Compilatore">Altro Compilatore</option>
                     </select>
                   </div>
 
