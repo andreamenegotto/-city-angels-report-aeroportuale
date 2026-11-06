@@ -1,6 +1,8 @@
 export interface BarrierEntry {
+  id?: string;
   ora: string;
   targa: string;
+  note?: string;
 }
 
 export interface SavedLicensePlate {
@@ -145,7 +147,7 @@ export interface ServiceReportData {
   oraFine: string;
   orarioTestoLibero: string;
   orariServizio?: ServiceTimeSlot[];
-  apertureSbarraInizio: [BarrierEntry, BarrierEntry];
+  apertureSbarraInizio: BarrierEntry[];
   luogoTermineFisso: string;
   comunicazioneInizioCO: string;
   comunicazioneFineCO: string;

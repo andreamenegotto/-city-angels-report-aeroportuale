@@ -47,6 +47,7 @@ import {
   Zap,
 } from 'lucide-react';
 import {
+  BarrierEntry,
   CorporateHeaderConfig,
   DEFAULT_ASSOCIAZIONE_CONFIG,
   DEFAULT_COOPERATIVA_CONFIG,
@@ -2265,16 +2266,60 @@ export default function App() {
     }));
   };
 
-  // Gestione Aperture Sbarra Inizio Servizio
-  const updateBarrierEntry = (index: 0 | 1, field: 'ora' | 'targa', val: string) => {
+  // Gestione Aperture Sbarra Inizio Servizio (Registrazione Targhe Fisse e di Volta in Volta)
+  const updateBarrierEntry = (index: number, field: keyof BarrierEntry, val: string) => {
     setReport((prev) => {
-      const copy: [typeof prev.apertureSbarraInizio[0], typeof prev.apertureSbarraInizio[1]] = [
-        { ...prev.apertureSbarraInizio[0] },
-        { ...prev.apertureSbarraInizio[1] },
-      ];
-      copy[index][field] = val;
-      return { ...prev, apertureSbarraInizio: copy };
+      const list = Array.isArray(prev.apertureSbarraInizio)
+        ? [...prev.apertureSbarraInizio]
+        : [];
+      while (list.length <= index) {
+        list.push({ id: `barrier-${list.length + 1}`, ora: '', targa: '' });
+      }
+      list[index] = {
+        ...list[index],
+        [field]: val,
+      };
+      return { ...prev, apertureSbarraInizio: list };
     });
+  };
+
+  const addBarrierEntry = (initialTarga = '', initialOra = '', note = '') => {
+    setReport((prev) => {
+      const list = Array.isArray(prev.apertureSbarraInizio)
+        ? [...prev.apertureSbarraInizio]
+        : [];
+      const newEntry: BarrierEntry = {
+        id: `barrier-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        ora: initialOra,
+        targa: initialTarga.trim().toUpperCase(),
+        note: note.trim(),
+      };
+      return { ...prev, apertureSbarraInizio: [...list, newEntry] };
+    });
+    showNotice(
+      initialTarga
+        ? `Targa "${initialTarga.trim().toUpperCase()}" aggiunta alla registrazione.`
+        : 'Nuovo campo targa libero aggiunto.'
+    );
+  };
+
+  const removeBarrierEntry = (index: number) => {
+    setReport((prev) => {
+      const list = Array.isArray(prev.apertureSbarraInizio)
+        ? [...prev.apertureSbarraInizio]
+        : [];
+      if (list.length <= 1) {
+        return {
+          ...prev,
+          apertureSbarraInizio: [{ id: 'barrier-1', ora: '', targa: '', note: '' }],
+        };
+      }
+      return {
+        ...prev,
+        apertureSbarraInizio: list.filter((_, i) => i !== index),
+      };
+    });
+    showNotice('Campo targa rimosso.');
   };
 
   // Funzioni di gestione Targhe Mezzi Fisse
@@ -2287,13 +2332,23 @@ export default function App() {
       savedPlates.find((p) => p.isDefaultSbarra2)?.targa ||
       (savedPlates.length > 1 ? savedPlates[1]?.targa : '');
 
-    setReport((prev) => ({
-      ...prev,
-      apertureSbarraInizio: [
-        { ...prev.apertureSbarraInizio[0], targa: def1 },
-        { ...prev.apertureSbarraInizio[1], targa: def2 },
-      ],
-    }));
+    setReport((prev) => {
+      const currentList = Array.isArray(prev.apertureSbarraInizio)
+        ? [...prev.apertureSbarraInizio]
+        : [];
+      if (currentList.length === 0) {
+        currentList.push({ id: 'barrier-1', ora: '', targa: '' });
+      }
+      if (def2 && currentList.length < 2) {
+        currentList.push({ id: 'barrier-2', ora: '', targa: '' });
+      }
+      const updated = currentList.map((entry, idx) => {
+        if (idx === 0 && def1) return { ...entry, targa: def1 };
+        if (idx === 1 && def2) return { ...entry, targa: def2 };
+        return entry;
+      });
+      return { ...prev, apertureSbarraInizio: updated };
+    });
     showNotice(
       `Targhe fisse applicate: Sbarra 1 = ${def1 || '—'}${
         def2 ? `, Sbarra 2 = ${def2}` : ''
@@ -4241,140 +4296,205 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* SBARRA 1 */}
-                  <div>
-                    <div className="flex flex-wrap items-center justify-between gap-1 mb-1">
-                      <span className="text-[11px] font-semibold text-slate-700">
-                        Registrazione sbarra 1:
+                  {/* REGISTRAZIONE DELLE SINGOLE TARGHE (TARGHE FISSE E REGISTRATE VOLTA IN VOLTA) */}
+                  <div className="space-y-3">
+                    <div className="text-[11px] text-slate-600 bg-white/70 border border-slate-200/80 p-2 rounded flex items-center justify-between gap-2">
+                      <span>
+                        Registrazione singole targhe: compila con le targhe fisse o inserisci liberamente quelle in uso volta per volta.
                       </span>
-                      {savedPlates.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1">
-                          <span className="text-[10px] text-slate-500">Targhe fisse:</span>
-                          {savedPlates.map((sp) => (
-                            <button
-                              key={sp.id}
-                              type="button"
-                              onClick={() => updateBarrierEntry(0, 'targa', sp.targa)}
-                              title={`Usa targa ${sp.targa}${sp.label ? ` (${sp.label})` : ''}`}
-                              className={`px-1.5 py-0.5 text-[10px] font-mono rounded cursor-pointer transition-colors ${
-                                report.apertureSbarraInizio[0]?.targa === sp.targa
-                                  ? 'bg-[#df0a14] text-white font-bold'
-                                  : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              {sp.targa} {sp.isDefaultSbarra1 ? '⭐' : ''}
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                      <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-300">
+                        {report.apertureSbarraInizio?.length || 0} {((report.apertureSbarraInizio?.length || 0) === 1) ? 'targa' : 'targhe'}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-600">ore:</span>
-                      <input
-                        type="time"
-                        value={report.apertureSbarraInizio[0]?.ora || ''}
-                        onChange={(e) => updateBarrierEntry(0, 'ora', e.target.value)}
-                        className="h-8 px-2 text-xs bg-white border border-slate-300 rounded font-mono-tabular"
-                      />
-                      <span className="text-xs text-slate-600">targa mezzo:</span>
-                      <div className="relative flex-1 flex items-center gap-1">
-                        <input
-                          type="text"
-                          list="saved-plates-datalist"
-                          placeholder="Es. GA 123 CA"
-                          value={report.apertureSbarraInizio[0]?.targa || ''}
-                          onChange={(e) => updateBarrierEntry(0, 'targa', e.target.value.toUpperCase())}
-                          className="h-8 px-2 text-xs uppercase font-mono font-medium bg-white border border-slate-300 rounded flex-1"
-                        />
-                        {report.apertureSbarraInizio[0]?.targa?.trim() &&
-                          !savedPlates.some(
-                            (p) => p.targa === report.apertureSbarraInizio[0]?.targa?.trim()
-                          ) && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                addSavedPlate(
-                                  report.apertureSbarraInizio[0]?.targa,
-                                  'Mezzo registrato',
-                                  false,
-                                  false
-                                )
-                              }
-                              title="Memorizza questa targa nei numeri fissi"
-                              className="px-2 h-8 text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-300 rounded hover:bg-emerald-100 whitespace-nowrap cursor-pointer"
-                            >
-                              + Memorizza
-                            </button>
-                          )}
-                      </div>
-                    </div>
-                  </div>
 
-                  {/* SBARRA 2 (OPZIONALE) */}
-                  <div>
-                    <div className="flex flex-wrap items-center justify-between gap-1 mb-1">
-                      <span className="text-[11px] font-semibold text-slate-700">
-                        Registrazione sbarra 2 (opzionale):
-                      </span>
-                      {savedPlates.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1">
-                          <span className="text-[10px] text-slate-500">Targhe fisse:</span>
-                          {savedPlates.map((sp) => (
-                            <button
-                              key={sp.id}
-                              type="button"
-                              onClick={() => updateBarrierEntry(1, 'targa', sp.targa)}
-                              title={`Usa targa ${sp.targa}${sp.label ? ` (${sp.label})` : ''}`}
-                              className={`px-1.5 py-0.5 text-[10px] font-mono rounded cursor-pointer transition-colors ${
-                                report.apertureSbarraInizio[1]?.targa === sp.targa
-                                  ? 'bg-[#df0a14] text-white font-bold'
-                                  : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              {sp.targa} {sp.isDefaultSbarra2 ? '⭐' : ''}
-                            </button>
-                          ))}
+                    {/* Elenco dinamico dei campi targa */}
+                    {((report.apertureSbarraInizio && report.apertureSbarraInizio.length > 0)
+                      ? report.apertureSbarraInizio
+                      : [{ id: 'barrier-1', ora: '', targa: '', note: '' }]
+                    ).map((entry, idx) => {
+                      const isRecognizedFixed = savedPlates.some(
+                        (p) => p.targa === entry.targa?.trim().toUpperCase()
+                      );
+                      const currentPlateUpper = (entry.targa || '').trim().toUpperCase();
+
+                      return (
+                        <div
+                          key={entry.id || `barrier-row-${idx}`}
+                          className="bg-white border border-slate-200 rounded-md p-2.5 shadow-2xs space-y-2 hover:border-slate-300 transition-colors"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-1.5 pb-1 border-b border-slate-100">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] font-bold text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-300">
+                                Targa #{idx + 1}
+                              </span>
+                              {currentPlateUpper && isRecognizedFixed && (
+                                <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                                  Targa fissa di servizio
+                                </span>
+                              )}
+                              {currentPlateUpper && !isRecognizedFixed && (
+                                <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                  Registrata di volta in volta
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1">
+                              {/* Scorciatoie Targhe Fisse per questa riga */}
+                              {savedPlates.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <span className="text-[10px] text-slate-400 hidden sm:inline">Fisse:</span>
+                                  {savedPlates.map((sp) => (
+                                    <button
+                                      key={sp.id}
+                                      type="button"
+                                      onClick={() => updateBarrierEntry(idx, 'targa', sp.targa)}
+                                      title={`Imposta targa ${sp.targa}${sp.label ? ` (${sp.label})` : ''}`}
+                                      className={`px-1.5 py-0.5 text-[10px] font-mono rounded cursor-pointer transition-colors ${
+                                        currentPlateUpper === sp.targa
+                                          ? 'bg-[#df0a14] text-white font-bold shadow-2xs'
+                                          : 'bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      {sp.targa}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Pulsante Rimuovi / Svuota */}
+                              {(report.apertureSbarraInizio || []).length > 1 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => removeBarrierEntry(idx)}
+                                  title="Elimina questo campo targa"
+                                  className="p-1 text-slate-400 hover:text-red-600 rounded hover:bg-red-50 cursor-pointer ml-1"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    updateBarrierEntry(idx, 'ora', '');
+                                    updateBarrierEntry(idx, 'targa', '');
+                                    updateBarrierEntry(idx, 'note', '');
+                                  }}
+                                  title="Svuota questo campo targa"
+                                  className="p-1 text-slate-300 hover:text-slate-600 rounded hover:bg-slate-100 cursor-pointer ml-1"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Campi input per questa targa */}
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                            {/* Ora apertura sbarra */}
+                            <div className="sm:col-span-3 flex items-center gap-1.5">
+                              <span className="text-[11px] font-medium text-slate-600 whitespace-nowrap">
+                                Ore:
+                              </span>
+                              <input
+                                type="time"
+                                value={entry.ora || ''}
+                                onChange={(e) => updateBarrierEntry(idx, 'ora', e.target.value)}
+                                className="w-full h-8 px-1.5 text-xs bg-slate-50 border border-slate-300 rounded font-mono-tabular"
+                                title="Ora apertura sbarra / accesso"
+                              />
+                            </div>
+
+                            {/* Numero targa */}
+                            <div className="sm:col-span-5 flex items-center gap-1">
+                              <span className="text-[11px] font-medium text-slate-600 whitespace-nowrap">
+                                Targa:
+                              </span>
+                              <div className="relative flex-1 flex items-center gap-1">
+                                <input
+                                  type="text"
+                                  list="saved-plates-datalist"
+                                  placeholder="Es. GA 123 CA o digita..."
+                                  value={entry.targa || ''}
+                                  onChange={(e) => updateBarrierEntry(idx, 'targa', e.target.value.toUpperCase())}
+                                  className="w-full h-8 px-2 text-xs uppercase font-mono font-bold text-slate-900 bg-white border border-slate-300 rounded"
+                                />
+                                {currentPlateUpper && !isRecognizedFixed && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      addSavedPlate(
+                                        currentPlateUpper,
+                                        entry.note || 'Mezzo di servizio registrato',
+                                        false,
+                                        false
+                                      )
+                                    }
+                                    title="Memorizza questa targa tra quelle fisse per riutilizzarla sempre"
+                                    className="px-1.5 h-8 text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-300 rounded hover:bg-emerald-100 whitespace-nowrap cursor-pointer"
+                                  >
+                                    + Memorizza
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Note mezzo / descrizione */}
+                            <div className="sm:col-span-4 flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                placeholder="Note / mezzo (opzionale)"
+                                value={entry.note || ''}
+                                onChange={(e) => updateBarrierEntry(idx, 'note', e.target.value)}
+                                className="w-full h-8 px-2 text-xs bg-slate-50 border border-slate-300 rounded text-slate-700"
+                                title="Note aggiuntive per questa targa (es. auto privata, mezzo sostitutivo)"
+                              />
+                            </div>
+                          </div>
                         </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-600">ore:</span>
-                      <input
-                        type="time"
-                        value={report.apertureSbarraInizio[1]?.ora || ''}
-                        onChange={(e) => updateBarrierEntry(1, 'ora', e.target.value)}
-                        className="h-8 px-2 text-xs bg-white border border-slate-300 rounded font-mono-tabular"
-                      />
-                      <span className="text-xs text-slate-600">targa mezzo:</span>
-                      <div className="relative flex-1 flex items-center gap-1">
-                        <input
-                          type="text"
-                          list="saved-plates-datalist"
-                          placeholder="Es. GA 456 CA"
-                          value={report.apertureSbarraInizio[1]?.targa || ''}
-                          onChange={(e) => updateBarrierEntry(1, 'targa', e.target.value.toUpperCase())}
-                          className="h-8 px-2 text-xs uppercase font-mono font-medium bg-white border border-slate-300 rounded flex-1"
-                        />
-                        {report.apertureSbarraInizio[1]?.targa?.trim() &&
-                          !savedPlates.some(
-                            (p) => p.targa === report.apertureSbarraInizio[1]?.targa?.trim()
-                          ) && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                addSavedPlate(
-                                  report.apertureSbarraInizio[1]?.targa,
-                                  'Mezzo registrato 2',
-                                  false,
-                                  false
-                                )
-                              }
-                              title="Memorizza questa targa nei numeri fissi"
-                              className="px-2 h-8 text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-300 rounded hover:bg-emerald-100 whitespace-nowrap cursor-pointer"
-                            >
-                              + Memorizza
-                            </button>
-                          )}
+                      );
+                    })}
+
+                    {/* Barra azioni aggiunta targhe */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => addBarrierEntry()}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded hover:bg-slate-100 shadow-2xs cursor-pointer transition-colors"
+                          title="Aggiunge un nuovo campo vuoto per registrare una targa aggiuntiva"
+                        >
+                          <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>+ Aggiungi Campo Targa</span>
+                        </button>
+
+                        {savedPlates.length > 0 && (
+                          <select
+                            onChange={(e) => {
+                              const selectedPlate = e.target.value;
+                              if (!selectedPlate) return;
+                              const matched = savedPlates.find((p) => p.targa === selectedPlate);
+                              addBarrierEntry(selectedPlate, '', matched?.label || '');
+                              e.target.value = '';
+                            }}
+                            defaultValue=""
+                            className="px-2 py-1.5 text-xs bg-white border border-slate-300 rounded text-slate-700 font-medium cursor-pointer"
+                            title="Aggiunge direttamente un nuovo campo precompilato con una targa fissa"
+                          >
+                            <option value="" disabled>
+                              + Aggiungi da Targa Fissa...
+                            </option>
+                            {savedPlates.map((sp) => (
+                              <option key={sp.id} value={sp.targa}>
+                                {sp.targa} {sp.label ? `(${sp.label})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+
+                      <div className="text-[11px] text-slate-500 italic">
+                        Campi liberi per ogni targa in turno
                       </div>
                     </div>
                   </div>

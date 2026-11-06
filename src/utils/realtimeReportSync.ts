@@ -1,6 +1,6 @@
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
-import { PhotoAttachment, RilevazioneItem, ServiceReportData } from '../types/report';
+import { BarrierEntry, PhotoAttachment, RilevazioneItem, ServiceReportData } from '../types/report';
 
 export interface CloudDraftMetadata {
   report: ServiceReportData;
@@ -325,20 +325,24 @@ export function safeMergeReport(
 
   merged.firmaImmagineUrl = current.firmaImmagineUrl || incoming.firmaImmagineUrl || '';
 
-  // Protezione aperture sbarra inizio
-  if (Array.isArray(current.apertureSbarraInizio) && Array.isArray(incoming.apertureSbarraInizio)) {
-    merged.apertureSbarraInizio = [
-      {
-        ora: pickBetterText(current.apertureSbarraInizio[0]?.ora, incoming.apertureSbarraInizio[0]?.ora),
-        targa: pickBetterText(current.apertureSbarraInizio[0]?.targa, incoming.apertureSbarraInizio[0]?.targa),
-      },
-      {
-        ora: pickBetterText(current.apertureSbarraInizio[1]?.ora, incoming.apertureSbarraInizio[1]?.ora),
-        targa: pickBetterText(current.apertureSbarraInizio[1]?.targa, incoming.apertureSbarraInizio[1]?.targa),
-      },
-    ];
-  } else if (Array.isArray(current.apertureSbarraInizio)) {
-    merged.apertureSbarraInizio = current.apertureSbarraInizio;
+  // Protezione aperture sbarra inizio (supporto per più targhe fisse e registrate volta in volta)
+  const currentAperture = Array.isArray(current.apertureSbarraInizio) ? current.apertureSbarraInizio : [];
+  const incomingAperture = Array.isArray(incoming.apertureSbarraInizio) ? incoming.apertureSbarraInizio : [];
+  if (currentAperture.length > 0 || incomingAperture.length > 0) {
+    const maxEntries = Math.max(currentAperture.length, incomingAperture.length);
+    const mergedAperture: BarrierEntry[] = [];
+    for (let i = 0; i < maxEntries; i++) {
+      const cur = currentAperture[i];
+      const inc = incomingAperture[i];
+      if (!cur && !inc) continue;
+      mergedAperture.push({
+        id: cur?.id || inc?.id || `barrier-${i + 1}`,
+        ora: pickBetterText(cur?.ora, inc?.ora),
+        targa: pickBetterText(cur?.targa, inc?.targa),
+        note: pickBetterText(cur?.note, inc?.note),
+      });
+    }
+    merged.apertureSbarraInizio = mergedAperture;
   }
 
   // Protezione comunicazioni e testo termine
