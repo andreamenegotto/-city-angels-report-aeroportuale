@@ -143,6 +143,13 @@ import {
   pushSharedArchiveToCloud,
   subscribeToSharedArchive,
 } from './utils/sharedArchiveSync';
+import {
+  normalizePlateKey,
+  pushSavedPlatesToCloud,
+  sanitizeSavedPlate,
+  subscribeToSavedPlates,
+  verifyFirestoreConnection,
+} from './utils/savedPlatesSync';
 import { USER_REGISTRY, KNOWN_LOCATIONS, formatUserRegistryName } from './utils/userRegistryData';
 import { UserRegistryPanel } from './components/UserRegistryPanel';
 
@@ -154,6 +161,7 @@ const STORAGE_KEY_ROSTER = 'city_angels_roster_v4';
 const STORAGE_KEY_HISTORY = 'city_angels_history_reports_v4';
 const STORAGE_KEY_CUSTOM_SUBJECTS = 'city_angels_custom_subjects_v2';
 const STORAGE_KEY_SAVED_PLATES = 'city_angels_saved_license_plates_v2';
+const STORAGE_KEY_DELETED_PLATES = 'city_angels_deleted_license_plates_v1';
 const STORAGE_KEY_SAVED_SIGNATURES = 'city_angels_saved_signatures_v2';
 const STORAGE_KEY_AUTO_MATCH_SIG = 'city_angels_auto_match_signatures_v1';
 
@@ -734,7 +742,7 @@ export default function App() {
     return [];
   });
 
-  // Targhe Mezzi Memorizzate (numeri di targa fissi per accesso Parcheggio P1)
+  // Targhe Mezzi Memorizzate (numeri di targa fissi per accesso Parcheggio P1, sincronizzati su Cloud Firestore)
   const [savedPlates, setSavedPlates] = useState<SavedLicensePlate[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SAVED_PLATES);
@@ -747,6 +755,24 @@ export default function App() {
     }
     return DEFAULT_SAVED_PLATES;
   });
+
+  const [deletedPlateTargas, setDeletedPlateTargas] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_DELETED_PLATES);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+
+  const savedPlatesRef = useRef<SavedLicensePlate[]>(savedPlates);
+  savedPlatesRef.current = savedPlates;
+  const deletedPlateTargasRef = useRef<string[]>(deletedPlateTargas);
+  deletedPlateTargasRef.current = deletedPlateTargas;
 
   const [showPlatesManager, setShowPlatesManager] = useState<boolean>(false);
   const [newPlateInput, setNewPlateInput] = useState<string>('');
@@ -1246,12 +1272,22 @@ export default function App() {
   }, [customSubjects]);
 
   useEffect(() => {
+    savedPlatesRef.current = savedPlates;
     try {
       localStorage.setItem(STORAGE_KEY_SAVED_PLATES, JSON.stringify(savedPlates));
     } catch {
       // ignore
     }
   }, [savedPlates]);
+
+  useEffect(() => {
+    deletedPlateTargasRef.current = deletedPlateTargas;
+    try {
+      localStorage.setItem(STORAGE_KEY_DELETED_PLATES, JSON.stringify(deletedPlateTargas));
+    } catch {
+      // ignore
+    }
+  }, [deletedPlateTargas]);
 
   useEffect(() => {
     try {
@@ -1268,18 +1304,6 @@ export default function App() {
       // ignore
     }
   }, [autoMatchSignature]);
-
-  // Se il report attivo non ha targhe impostate, precompila automaticamente con le targhe fisse memorizzate
-  useEffect(() => {
-    const def1 = savedPlates.find((p) => p.isDefaultSbarra1)?.targa;
-    const def2 = savedPlates.find((p) => p.isDefaultSbarra2)?.targa;
-    if (def1 && !report.apertureSbarraInizio?.[0]?.targa) {
-      updateBarrierEntry(0, 'targa', def1);
-    }
-    if (def2 && !report.apertureSbarraInizio?.[1]?.targa) {
-      updateBarrierEntry(1, 'targa', def2);
-    }
-  }, []);
 
   // Mantieni costantemente attivo il collegamento a Google Drive e sincronizza lo storico all'avvio
   useEffect(() => {
@@ -1359,6 +1383,7 @@ export default function App() {
 
     // Helper per applicare le modifiche remote garantendo che gli orari e i dati inseriti non vengano mai azzerati
     const applyIncomingRemoteDraft = (remoteData: CloudDraftMetadata) => {
+      const wasAlreadyHydrated = hasHydratedCloudDraftRef.current;
       hasHydratedCloudDraftRef.current = true;
       if (!remoteData || !remoteData.report) return;
 
@@ -1373,9 +1398,10 @@ export default function App() {
       const currentNum = Number(currentRep?.numeroReport) || 0;
       const incomingNum = Number(incomingRep?.numeroReport) || 0;
 
-      // Se l'aggiornamento remoto è più vecchio di quello già applicato e riguarda lo STESSO report, ignoralo.
-      // MA se il report remoto ha un numero superiore (es. nuovo Report 38 rispetto al 37), deve SEMPRE prevalere!
+      // Ignora aggiornamenti obsoleti SOLO se provengono dalla cache locale/iniziale;
+      // gli aggiornamenti live dal server (fromCache === false) devono sempre essere valutati per evitare blocchi da clock skew tra PC e smartphone.
       if (
+        remoteData.fromCache !== false &&
         incomingNum === currentNum &&
         remoteData.updatedAt &&
         lastRemoteTimestampRef.current &&
@@ -1393,6 +1419,10 @@ export default function App() {
       } else if (incomingNum < currentNum) {
         // Il nostro dispositivo è già su un numero di report più avanzato, non retrocedere
         return;
+      } else if (wasAlreadyHydrated && !hasUserEditedDraftRef.current && remoteData.fromCache === false) {
+        // Dispositivo in sola lettura / appena allineato senza modifiche locali in corso:
+        // adotta fedelmente lo stato sul cloud (incluse aggiunte e rimozioni di targhe fatte da smartphone/PC)
+        mergedReport = normalizeReportOrari(incomingRep);
       } else {
         // Stesso numero di report: unione collaborativa protetta senza mai cancellare testo o rilevazioni
         mergedReport = safeMergeReport(currentRep, incomingRep);
@@ -1467,6 +1497,28 @@ export default function App() {
 
     applyIncomingRemoteDraftRef.current = applyIncomingRemoteDraft;
 
+    // Verifica connessione server Firestore all'avvio
+    verifyFirestoreConnection().catch(() => {});
+
+    // 1b. Sincronizzazione in tempo reale delle Targhe Fisse memorizzate tra PC e Smartphone
+    const unsubSavedPlates = subscribeToSavedPlates(
+      () => savedPlatesRef.current,
+      () => deletedPlateTargasRef.current,
+      () => resolveAuthorName(currentReportRef.current, driveUser, rosterRef.current, activeOperator),
+      (mergedPlates, mergedDeleted) => {
+        savedPlatesRef.current = mergedPlates;
+        deletedPlateTargasRef.current = mergedDeleted;
+        setSavedPlates(mergedPlates);
+        setDeletedPlateTargas(mergedDeleted);
+        try {
+          localStorage.setItem(STORAGE_KEY_SAVED_PLATES, JSON.stringify(mergedPlates));
+          localStorage.setItem(STORAGE_KEY_DELETED_PLATES, JSON.stringify(mergedDeleted));
+        } catch {
+          // ignore
+        }
+      }
+    );
+
     // 2. Sincronizzazione in tempo reale della bozza collaborativa su Cloud Firestore (PC & Smartphone Android)
     const unsubDraft = subscribeToActiveDraft((remoteData) => {
       applyIncomingRemoteDraft(remoteData);
@@ -1478,6 +1530,25 @@ export default function App() {
         hasHydratedCloudDraftRef.current = true;
         if (cloudData && cloudData.report) {
           applyIncomingRemoteDraft(cloudData);
+        }
+        // Solo DOPO l'idratazione dal cloud, se nessuna targa è stata impostata nel report corrente, precompila le predefinite senza sporcare lo stato di editing
+        const activeEntries = currentReportRef.current?.apertureSbarraInizio || [];
+        const hasAnyPlateOrTime = activeEntries.some((b) => Boolean(b?.ora?.trim() || b?.targa?.trim() || b?.note?.trim()));
+        if (!hasAnyPlateOrTime) {
+          const def1 = savedPlatesRef.current.find((p) => p.isDefaultSbarra1)?.targa;
+          const def2 = savedPlatesRef.current.find((p) => p.isDefaultSbarra2)?.targa;
+          if (def1 || def2) {
+            const nextAperture = [...activeEntries];
+            while (nextAperture.length < (def2 ? 2 : 1)) {
+              nextAperture.push({ id: `barrier-${nextAperture.length + 1}`, ora: '', targa: '' });
+            }
+            if (def1) nextAperture[0] = { ...nextAperture[0], id: nextAperture[0]?.id || 'barrier-1', targa: def1 };
+            if (def2 && nextAperture[1]) nextAperture[1] = { ...nextAperture[1], id: nextAperture[1]?.id || 'barrier-2', targa: def2 };
+            const prefilled = { ...currentReportRef.current, apertureSbarraInizio: nextAperture };
+            lastAppliedRemoteHashRef.current = JSON.stringify(prefilled);
+            currentReportRef.current = prefilled;
+            setReport(prefilled);
+          }
         }
       })
       .catch(() => {
@@ -1548,6 +1619,7 @@ export default function App() {
     return () => {
       unsubDriveUrl();
       unsubAuth();
+      unsubSavedPlates();
       unsubDraft();
       unsubArchive();
       window.removeEventListener('visibilitychange', handleFlushDraft);
@@ -2268,6 +2340,7 @@ export default function App() {
 
   // Gestione Aperture Sbarra Inizio Servizio (Registrazione Targhe Fisse e di Volta in Volta)
   const updateBarrierEntry = (index: number, field: keyof BarrierEntry, val: string) => {
+    hasUserEditedDraftRef.current = true;
     setReport((prev) => {
       const list = Array.isArray(prev.apertureSbarraInizio)
         ? [...prev.apertureSbarraInizio]
@@ -2284,6 +2357,7 @@ export default function App() {
   };
 
   const addBarrierEntry = (initialTarga = '', initialOra = '', note = '') => {
+    hasUserEditedDraftRef.current = true;
     setReport((prev) => {
       const list = Array.isArray(prev.apertureSbarraInizio)
         ? [...prev.apertureSbarraInizio]
@@ -2304,6 +2378,7 @@ export default function App() {
   };
 
   const removeBarrierEntry = (index: number) => {
+    hasUserEditedDraftRef.current = true;
     setReport((prev) => {
       const list = Array.isArray(prev.apertureSbarraInizio)
         ? [...prev.apertureSbarraInizio]
@@ -2322,8 +2397,9 @@ export default function App() {
     showNotice('Campo targa rimosso.');
   };
 
-  // Funzioni di gestione Targhe Mezzi Fisse
+  // Funzioni di gestione Targhe Mezzi Fisse (con sincronizzazione immediata su Cloud Firestore)
   const handlePrecompileFixedPlates = () => {
+    hasUserEditedDraftRef.current = true;
     const def1 =
       savedPlates.find((p) => p.isDefaultSbarra1)?.targa ||
       savedPlates[0]?.targa ||
@@ -2356,72 +2432,109 @@ export default function App() {
     );
   };
 
+  const syncSavedPlatesStateAndCloud = (nextPlates: SavedLicensePlate[], nextDeleted: string[]) => {
+    savedPlatesRef.current = nextPlates;
+    deletedPlateTargasRef.current = nextDeleted;
+    setSavedPlates(nextPlates);
+    setDeletedPlateTargas(nextDeleted);
+    try {
+      localStorage.setItem(STORAGE_KEY_SAVED_PLATES, JSON.stringify(nextPlates));
+      localStorage.setItem(STORAGE_KEY_DELETED_PLATES, JSON.stringify(nextDeleted));
+    } catch {
+      // ignore
+    }
+    const authorLabel = resolveAuthorName(currentReportRef.current, driveUser, rosterRef.current, activeOperator);
+    pushSavedPlatesToCloud(nextPlates, nextDeleted, authorLabel).catch(() => {});
+  };
+
   const addSavedPlate = (
     targa: string,
     label = '',
     isDefault1 = false,
     isDefault2 = false
   ) => {
-    const cleanTarga = targa.trim().toUpperCase();
+    const cleanTarga = normalizePlateKey(targa);
     if (!cleanTarga) {
       showNotice('Inserisci un numero di targa valido.');
       return;
     }
-    setSavedPlates((prev) => {
-      const exists = prev.find((p) => p.targa === cleanTarga);
-      if (exists) {
-        showNotice(`La targa "${cleanTarga}" è già memorizzata.`);
-        return prev.map((p) =>
-          p.targa === cleanTarga
-            ? {
-                ...p,
-                label: label.trim() || p.label,
-                isDefaultSbarra1: isDefault1 ? true : p.isDefaultSbarra1,
-                isDefaultSbarra2: isDefault2 ? true : p.isDefaultSbarra2,
-              }
-            : p
-        );
-      }
-      const updated = prev.map((p) => ({
-        ...p,
-        isDefaultSbarra1: isDefault1 ? false : p.isDefaultSbarra1,
-        isDefaultSbarra2: isDefault2 ? false : p.isDefaultSbarra2,
-      }));
-      const newEntry: SavedLicensePlate = {
+
+    const prev = savedPlatesRef.current;
+    const exists = prev.find((p) => normalizePlateKey(p.targa) === cleanTarga);
+    let nextPlates: SavedLicensePlate[];
+
+    if (exists) {
+      nextPlates = prev.map((p) => {
+        if (normalizePlateKey(p.targa) === cleanTarga) {
+          return sanitizeSavedPlate({
+            ...p,
+            label: label.trim() || p.label,
+            isDefaultSbarra1: isDefault1 ? true : p.isDefaultSbarra1,
+            isDefaultSbarra2: isDefault2 ? true : p.isDefaultSbarra2,
+          });
+        }
+        return sanitizeSavedPlate({
+          ...p,
+          isDefaultSbarra1: isDefault1 ? false : p.isDefaultSbarra1,
+          isDefaultSbarra2: isDefault2 ? false : p.isDefaultSbarra2,
+        });
+      });
+      showNotice(`La targa "${cleanTarga}" è già memorizzata e sincronizzata.`);
+    } else {
+      const updated = prev.map((p) =>
+        sanitizeSavedPlate({
+          ...p,
+          isDefaultSbarra1: isDefault1 ? false : p.isDefaultSbarra1,
+          isDefaultSbarra2: isDefault2 ? false : p.isDefaultSbarra2,
+        })
+      );
+      const newEntry = sanitizeSavedPlate({
         id: `plate-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         targa: cleanTarga,
         label: label.trim() || undefined,
         isDefaultSbarra1: isDefault1,
         isDefaultSbarra2: isDefault2,
-      };
-      return [...updated, newEntry];
-    });
+      });
+      nextPlates = [...updated, newEntry];
+      showNotice(`Targa fissa "${cleanTarga}" memorizzata e sincronizzata su tutti i dispositivi.`);
+    }
+
+    const nextDeleted = deletedPlateTargasRef.current.filter(
+      (t) => normalizePlateKey(t) !== cleanTarga
+    );
+    syncSavedPlatesStateAndCloud(nextPlates, nextDeleted);
+
     setNewPlateInput('');
     setNewPlateLabel('');
     setNewPlateDef1(false);
     setNewPlateDef2(false);
-    showNotice(`Targa fissa "${cleanTarga}" memorizzata con successo.`);
   };
 
   const removeSavedPlate = (id: string) => {
-    setSavedPlates((prev) => prev.filter((p) => p.id !== id));
-    showNotice('Targa rimossa dalla memoria.');
+    const prev = savedPlatesRef.current;
+    const target = prev.find((p) => p.id === id);
+    const nextPlates = prev.filter((p) => p.id !== id);
+    const nextDeleted = target?.targa
+      ? Array.from(new Set([...deletedPlateTargasRef.current, normalizePlateKey(target.targa)]))
+      : deletedPlateTargasRef.current;
+    syncSavedPlatesStateAndCloud(nextPlates, nextDeleted);
+    showNotice('Targa rimossa dalla memoria e sincronizzata.');
   };
 
   const togglePlateDefault = (id: string, sbarra: 1 | 2) => {
-    setSavedPlates((prev) => {
-      const target = prev.find((p) => p.id === id);
-      if (!target) return prev;
-      const key = sbarra === 1 ? 'isDefaultSbarra1' : 'isDefaultSbarra2';
-      const newVal = !target[key];
-      return prev.map((p) => {
-        if (p.id === id) {
-          return { ...p, [key]: newVal };
-        }
-        return newVal ? { ...p, [key]: false } : p;
-      });
+    const prev = savedPlatesRef.current;
+    const target = prev.find((p) => p.id === id);
+    if (!target) return;
+    const key = sbarra === 1 ? 'isDefaultSbarra1' : 'isDefaultSbarra2';
+    const newVal = !target[key];
+    const nextPlates = prev.map((p) => {
+      if (p.id === id) {
+        return sanitizeSavedPlate({ ...p, [key]: newVal });
+      }
+      return sanitizeSavedPlate(newVal ? { ...p, [key]: false } : p);
     });
-    showNotice(`Targa predefinita per Sbarra ${sbarra} aggiornata.`);
+    syncSavedPlatesStateAndCloud(nextPlates, deletedPlateTargasRef.current);
+    showNotice(`Targa predefinita per Sbarra ${sbarra} aggiornata e sincronizzata.`);
   };
 
   // Rilevazioni
@@ -2997,8 +3110,8 @@ export default function App() {
         },
       ],
       apertureSbarraInizio: [
-        { ora: '', targa: '' },
-        { ora: '', targa: '' },
+        { id: 'barrier-1', ora: '', targa: '' },
+        { id: 'barrier-2', ora: '', targa: '' },
       ],
       luogoTermineFisso: TESTO_FISSO_LUOGO_TERMINE,
       comunicazioneInizioCO: '',

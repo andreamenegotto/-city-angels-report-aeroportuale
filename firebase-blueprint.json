@@ -43,6 +43,20 @@
         "updatedBy": { "type": "string" }
       },
       "required": ["reports"]
+    },
+    "AppSetting": {
+      "title": "AppSetting",
+      "description": "Shared application configuration including Google Drive link and memorized fixed vehicle license plates",
+      "type": "object",
+      "properties": {
+        "plates": { "type": "array" },
+        "deletedTargas": { "type": "array" },
+        "driveFolderUrl": { "type": "string" },
+        "updatedAt": { "type": "number" },
+        "updatedAtIso": { "type": "string" },
+        "updatedBy": { "type": "string" },
+        "clientId": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -61,6 +75,10 @@
     "/app_shared_archive/{docId}": {
       "schema": { "$ref": "SharedArchive" },
       "description": "Shared historical reports archive synchronized across PC and Android"
+    },
+    "/app_settings/{settingId}": {
+      "schema": { "$ref": "AppSetting" },
+      "description": "Shared application settings including fixed vehicle license plates synchronized across PC and Android"
     }
   }
 }

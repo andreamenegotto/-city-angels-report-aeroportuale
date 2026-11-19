@@ -9,6 +9,7 @@ export interface CloudDraftMetadata {
   updatedBy: string; // Nome utente o email compilatore
   clientId: string; // Identificativo sessione del dispositivo
   version: number;
+  fromCache?: boolean;
 }
 
 /**
@@ -329,20 +330,53 @@ export function safeMergeReport(
   const currentAperture = Array.isArray(current.apertureSbarraInizio) ? current.apertureSbarraInizio : [];
   const incomingAperture = Array.isArray(incoming.apertureSbarraInizio) ? incoming.apertureSbarraInizio : [];
   if (currentAperture.length > 0 || incomingAperture.length > 0) {
-    const maxEntries = Math.max(currentAperture.length, incomingAperture.length);
-    const mergedAperture: BarrierEntry[] = [];
-    for (let i = 0; i < maxEntries; i++) {
-      const cur = currentAperture[i];
-      const inc = incomingAperture[i];
-      if (!cur && !inc) continue;
-      mergedAperture.push({
-        id: cur?.id || inc?.id || `barrier-${i + 1}`,
-        ora: pickBetterText(cur?.ora, inc?.ora),
-        targa: pickBetterText(cur?.targa, inc?.targa),
-        note: pickBetterText(cur?.note, inc?.note),
+    const isDefaultUncompiledList = (list: BarrierEntry[]) =>
+      list.length <= 2 &&
+      list.every((b) => {
+        const ora = (b?.ora || '').trim();
+        const note = (b?.note || '').trim();
+        const targa = (b?.targa || '').trim().toUpperCase();
+        return !ora && !note && (!targa || targa === 'GA 123 CA' || targa === 'GA 456 CA');
       });
+
+    if (isDefaultUncompiledList(currentAperture) && incomingAperture.length > 0) {
+      merged.apertureSbarraInizio = incomingAperture.map((inc, idx) => ({
+        id: inc?.id || `barrier-${idx + 1}`,
+        ora: inc?.ora || '',
+        targa: inc?.targa || '',
+        note: inc?.note || '',
+      }));
+    } else if (isDefaultUncompiledList(incomingAperture) && currentAperture.length > 0) {
+      merged.apertureSbarraInizio = currentAperture.map((cur, idx) => ({
+        id: cur?.id || `barrier-${idx + 1}`,
+        ora: cur?.ora || '',
+        targa: cur?.targa || '',
+        note: cur?.note || '',
+      }));
+    } else {
+      const maxEntries = Math.max(currentAperture.length, incomingAperture.length);
+      const mergedAperture: BarrierEntry[] = [];
+      for (let i = 0; i < maxEntries; i++) {
+        const cur = currentAperture[i];
+        const inc = incomingAperture[i];
+        if (!cur && !inc) continue;
+        const curHasTimeOrNote = Boolean((cur?.ora || '').trim() || (cur?.note || '').trim());
+        const incHasTimeOrNote = Boolean((inc?.ora || '').trim() || (inc?.note || '').trim());
+        const chosenTarga =
+          incHasTimeOrNote && !curHasTimeOrNote && (inc?.targa || '').trim()
+            ? inc.targa
+            : curHasTimeOrNote && !incHasTimeOrNote && (cur?.targa || '').trim()
+            ? cur.targa
+            : pickBetterText(cur?.targa, inc?.targa);
+        mergedAperture.push({
+          id: inc?.id || cur?.id || `barrier-${i + 1}`,
+          ora: pickBetterText(cur?.ora, inc?.ora),
+          targa: chosenTarga || '',
+          note: pickBetterText(cur?.note, inc?.note),
+        });
+      }
+      merged.apertureSbarraInizio = mergedAperture;
     }
-    merged.apertureSbarraInizio = mergedAperture;
   }
 
   // Protezione comunicazioni e testo termine
@@ -653,6 +687,7 @@ export function subscribeToActiveDraft(
           updatedBy: data.updatedBy || 'Collaboratore',
           clientId: data.clientId || '',
           version: typeof data.version === 'number' ? data.version : updatedAtNum,
+          fromCache: snapshot.metadata.fromCache,
         };
 
         onRemoteUpdate(metadata);
