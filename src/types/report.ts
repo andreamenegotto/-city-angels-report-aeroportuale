@@ -55,6 +55,20 @@ export const DEFAULT_SAVED_PLATES: SavedLicensePlate[] = [
     isDefaultSbarra1: false,
     isDefaultSbarra2: true,
   },
+  {
+    id: 'plate-3',
+    targa: 'EY434AD',
+    label: 'Mezzo registrato',
+    isDefaultSbarra1: false,
+    isDefaultSbarra2: false,
+  },
+  {
+    id: 'plate-4',
+    targa: 'GE227RV',
+    label: 'Mezzo registrato 2',
+    isDefaultSbarra1: false,
+    isDefaultSbarra2: false,
+  },
 ];
 
 export interface RosterMember {

@@ -178,6 +178,59 @@ export async function verifyFirestoreConnection(): Promise<void> {
   }
 }
 
+export async function fetchAndMergeSavedPlatesFromServer(
+  localPlates: SavedLicensePlate[],
+  localDeleted: string[],
+  authorLabel: string
+): Promise<{ plates: SavedLicensePlate[]; deletedTargas: string[] }> {
+  const path = `${SETTINGS_COLLECTION}/${SAVED_PLATES_DOC_ID}`;
+  try {
+    const docRef = doc(db, SETTINGS_COLLECTION, SAVED_PLATES_DOC_ID);
+    const snap = await getDocFromServer(docRef);
+
+    if (!snap.exists()) {
+      const { merged } = mergeSavedPlates(localPlates, [], localDeleted);
+      await pushSavedPlatesToCloud(merged, localDeleted, authorLabel).catch(() => {});
+      return { plates: merged, deletedTargas: localDeleted };
+    }
+
+    const data = snap.data() as Partial<CloudSavedPlatesDoc> | undefined;
+    const remotePlates = Array.isArray(data?.plates) ? data.plates : [];
+    const remoteDeleted = Array.isArray(data?.deletedTargas)
+      ? data.deletedTargas.map((t) => normalizePlateKey(t)).filter(Boolean)
+      : [];
+
+    const remotePlateKeys = new Set(
+      remotePlates.map((p) => normalizePlateKey(p.targa)).filter(Boolean)
+    );
+    const combinedDeleted = Array.from(
+      new Set([
+        ...remoteDeleted,
+        ...localDeleted.filter((t) => !remotePlateKeys.has(normalizePlateKey(t))),
+      ])
+    );
+
+    const { merged, needsPushToCloud } = mergeSavedPlates(
+      localPlates,
+      remotePlates,
+      combinedDeleted
+    );
+
+    if (needsPushToCloud) {
+      await pushSavedPlatesToCloud(merged, combinedDeleted, authorLabel).catch(() => {});
+    }
+
+    return {
+      plates: merged,
+      deletedTargas: remoteDeleted.length > 0 ? remoteDeleted : combinedDeleted,
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    const { merged } = mergeSavedPlates(localPlates, [], localDeleted);
+    return { plates: merged, deletedTargas: localDeleted };
+  }
+}
+
 export function subscribeToSavedPlates(
   getLocalPlates: () => SavedLicensePlate[],
   getLocalDeletedTargas: () => string[],
@@ -188,6 +241,17 @@ export function subscribeToSavedPlates(
   try {
     const docRef = doc(db, SETTINGS_COLLECTION, SAVED_PLATES_DOC_ID);
     const myClientId = getOrCreateClientId();
+
+    // Scarica subito dal server Firestore per bypassare qualsiasi cache browser
+    fetchAndMergeSavedPlatesFromServer(
+      getLocalPlates(),
+      getLocalDeletedTargas(),
+      getAuthorLabel()
+    )
+      .then(({ plates, deletedTargas }) => {
+        onMergedUpdate(plates, deletedTargas);
+      })
+      .catch(() => {});
 
     const unsub = onSnapshot(
       docRef,

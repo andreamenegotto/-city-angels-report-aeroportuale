@@ -623,7 +623,7 @@ export function buildStandaloneHtml(
     }
 
     const STORAGE_KEY_SAVED_PLATES = 'city_angels_saved_license_plates_v2';
-    let savedPlates = ['GA 123 CA', 'GA 456 CA'];
+    let savedPlates = ['GA 123 CA', 'GA 456 CA', 'EY434AD', 'GE227RV'];
     try {
       const sp = localStorage.getItem(STORAGE_KEY_SAVED_PLATES);
       if (sp) {

@@ -144,6 +144,7 @@ import {
   subscribeToSharedArchive,
 } from './utils/sharedArchiveSync';
 import {
+  fetchAndMergeSavedPlatesFromServer,
   normalizePlateKey,
   pushSavedPlatesToCloud,
   sanitizeSavedPlate,
@@ -2447,6 +2448,26 @@ export default function App() {
     pushSavedPlatesToCloud(nextPlates, nextDeleted, authorLabel).catch(() => {});
   };
 
+  const handleSyncSavedPlatesNow = async () => {
+    const authorLabel = resolveAuthorName(currentReportRef.current, driveUser, rosterRef.current, activeOperator);
+    const { plates, deletedTargas } = await fetchAndMergeSavedPlatesFromServer(
+      savedPlatesRef.current,
+      deletedPlateTargasRef.current,
+      authorLabel
+    );
+    savedPlatesRef.current = plates;
+    deletedPlateTargasRef.current = deletedTargas;
+    setSavedPlates(plates);
+    setDeletedPlateTargas(deletedTargas);
+    try {
+      localStorage.setItem(STORAGE_KEY_SAVED_PLATES, JSON.stringify(plates));
+      localStorage.setItem(STORAGE_KEY_DELETED_PLATES, JSON.stringify(deletedTargas));
+    } catch {
+      // ignore
+    }
+    showNotice(`Targhe fisse sincronizzate dal Cloud: ${plates.length} targhe disponibili.`);
+  };
+
   const addSavedPlate = (
     targa: string,
     label = '',
@@ -4273,18 +4294,29 @@ export default function App() {
                   {/* PANNELLO ESPANDIBILE: GESTIONE TARGHE FISSE */}
                   {showPlatesManager && (
                     <div className="bg-white border border-blue-200 rounded-md p-3 space-y-3 text-xs shadow-xs">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <div className="font-bold text-slate-900 flex items-center gap-1.5">
                           <Car className="w-4 h-4 text-blue-600" />
-                          <span>Memoria Numeri di Targa Fissi</span>
+                          <span>Memoria Numeri di Targa Fissi ({savedPlates.length})</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowPlatesManager(false)}
-                          className="text-slate-400 hover:text-slate-600 font-bold px-1"
-                        >
-                          ✕
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={handleSyncSavedPlatesNow}
+                            title="Scarica e riallinea subito le targhe fisse dal Cloud Firestore"
+                            className="px-2 py-0.5 text-[10px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 flex items-center gap-1 cursor-pointer"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                            <span>Sincronizza Cloud</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowPlatesManager(false)}
+                            className="text-slate-400 hover:text-slate-600 font-bold px-1 cursor-pointer"
+                          >
+                            ✕
+                          </button>
+                        </div>
                       </div>
                       <p className="text-[11px] text-slate-600">
                         I numeri di targa dei mezzi di servizio sono fissi. Memorizzali qui per ritrovarli suggeriti e precompilati in ogni servizio.
